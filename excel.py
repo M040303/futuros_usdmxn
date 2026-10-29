@@ -9,7 +9,36 @@ from motor import libro_ruta
 
 NAVY='13253B'; BLUE='1570A6'; LIGHT='EAF2F8'; WHITE='FFFFFF'
 
-def crear_excel(c,comparacion,detalle,ejemplos,bandas,max_filas=100000,modo='fijo'):
+# Se comparte con la pestaña de definiciones de Streamlit.
+# Cada entrada es (nombre claro, unidad, interpretación).
+DEFINICIONES = {
+    'modelo': ('Modelo', 'categoría', 'Método con el que se generó el dólar: logística, MBG o ARMA-GARCH-t.'),
+    'ruta': ('Ruta', 'identificador', 'Número de escenario dentro de un modelo; no es una fecha ni una observación histórica.'),
+    'pnl_bruto': ('Ganancia bruta realizada', 'MXN', 'Suma de las liquidaciones diarias del futuro hasta el cierre efectivo, antes de costos.'),
+    'ganancia_neta': ('Ganancia neta realizada', 'MXN', 'Efectivo final menos capital inicial; incluye liquidaciones y costos de entrada y salida.'),
+    'efectivo_retirar': ('Efectivo final retirable', 'MXN', 'Caja después de devolver el margen y cobrar costos de salida; puede ser negativa en un escenario extremo.'),
+    'capital_inyectado': ('Capital destinado a la operación', 'MXN', 'Margen inicial más costo de entrada y llamadas pagadas. Las llamadas son transferencias desde la caja, no pérdidas adicionales.'),
+    'depositos_llamadas': ('Depósitos por llamadas pagadas', 'MXN', 'Suma transferida desde la caja externa hacia el margen antes del cierre efectivo.'),
+    'numero_llamadas': ('Número de llamadas pagadas', 'conteo', 'Cantidad de sesiones en las que se pagó una llamada; una llamada impaga que provoca cierre no se cuenta.'),
+    'llamada_maxima': ('Mayor llamada pagada', 'MXN', 'Mayor depósito individual al margen realizado en una sesión; cero si no hubo llamadas pagadas.'),
+    'dia_llamada_maxima': ('Día de la mayor llamada pagada', 'día natural', 'Días naturales desde la apertura; -1 significa que no hubo llamadas pagadas.'),
+    'dolar_llamada_maxima': ('Dólar en la mayor llamada pagada', 'MXN/USD', 'Precio usado como futuro aproximado en el día de la llamada máxima; vacío si no hubo llamada.'),
+    'caja_minima': ('Caja externa mínima', 'MXN', 'Menor caja fuera del margen observada durante la operación y al cierre.'),
+    'patrimonio_minimo': ('Patrimonio mínimo', 'MXN', 'Menor valor de caja más margen durante la operación y al cierre.'),
+    'dia_cierre': ('Día de cierre', 'día natural', 'Días naturales desde la apertura hasta el cierre efectivo, anticipado o programado.'),
+    'motivo_cierre': ('Motivo de cierre', 'categoría', 'Programado si llega al día final; sin_liquidez si una llamada no puede pagarse.'),
+    'precio_dolar_final': ('Dólar al cierre efectivo', 'MXN/USD', 'Spot simulado del día en que la ruta realmente cierra; puede ser anterior al cierre programado.'),
+    'pnl_bruto_horizonte': ('Ganancia bruta hasta el horizonte', 'MXN', 'Ganancia o pérdida hipotética si la posición permaneciera abierta hasta el cierre previsto, sin costos.'),
+    'capital_requerido_horizonte': ('Capital requerido hasta el horizonte', 'MXN', 'Margen inicial más costo de entrada y todas las llamadas hipotéticas hasta el cierre previsto; excluye costo de salida.'),
+    'depositos_llamadas_horizonte': ('Llamadas hipotéticas acumuladas', 'MXN', 'Suma de llamadas que habría requerido sostener la posición hasta el día final.'),
+    'numero_llamadas_horizonte': ('Número de llamadas hipotéticas', 'conteo', 'Sesiones con llamada en la cuenta hipotética que no se cierra por falta de caja.'),
+    'llamada_maxima_horizonte': ('Mayor llamada hipotética', 'MXN', 'Mayor depósito individual requerido en la cuenta hipotética hasta el horizonte.'),
+    'dia_llamada_maxima_horizonte': ('Día de mayor llamada hipotética', 'día natural', 'Días naturales desde la apertura; -1 significa que no hubo llamada hipotética.'),
+    'capital_suficiente_horizonte': ('Capital suficiente hasta el horizonte', '0/1', 'Verdadero cuando el capital requerido hipotético no supera el capital disponible.'),
+    'cierre_forzoso': ('Cierre por falta de liquidez', '0/1', 'Verdadero si una llamada impaga obligó a cerrar antes de la fecha programada.'),
+}
+
+def crear_excel(c,comparacion,detalle,ejemplos,bandas,estadisticas,cierres,modo='fijo'):
     wb=Workbook(); ws=wb.active; ws.title='Resumen'
     ws.append(['FUTUROS USD/MXN | COMPARACION MONTE CARLO'])
     ws.append(['Escenario academico prospectivo; cotizacion del futuro aproximada por F = spot'])
@@ -20,15 +49,22 @@ def crear_excel(c,comparacion,detalle,ejemplos,bandas,max_filas=100000,modo='fij
     principales=['modelo','simulaciones','capital','prob_capital_suficiente','prob_cierre_forzoso','prob_perdida_neta','mediana_neta','p05_neta','p95_neta','p95_capital_requerido','p99_capital_requerido','VaR95_neto','VaR99_neto','ES95_neto_muestral','ES99_neto_muestral']
     ws.append(principales)
     for row in comparacion[principales].itertuples(index=False,name=None): ws.append([None if str(v)=='nan' else v for v in row])
-    st=wb.create_sheet('Estadisticos')
-    st.append(['Modelo','Variable','Estadistico','Valor'])
-    for _,row in comparacion.iterrows():
-        for col in comparacion.columns:
-            if col not in principales:
-                suffix=next((x for x in ('_promedio_muestral','_desviacion_muestral','_mediana','_min','_max') if col.endswith(x)),None)
-                variable=col[:-len(suffix)] if suffix else col
-                estadistico=suffix[1:] if suffix else 'valor'
-                st.append([row['modelo'],variable,estadistico,None if str(row[col])=='nan' else row[col]])
+    st=wb.create_sheet('Estadisticas_variable')
+    st.append(['Modelo','Variable','Nombre claro','Unidad','Observaciones','Sin dato',
+               'Media','Varianza','Desviación','Mínimo','p05','p25','Mediana',
+               'p75','p95','p99','Máximo'])
+    for row in estadisticas.itertuples(index=False):
+        nombre,unidad,_=DEFINICIONES.get(row.variable,(row.variable,'',''))
+        st.append([row.modelo,row.variable,nombre,unidad,row.observaciones,row.sin_dato,
+                   row.media,row.varianza,row.desviacion,row.minimo,row.p05,row.p25,
+                   row.mediana,row.p75,row.p95,row.p99,row.maximo])
+    fr=wb.create_sheet('Motivos_cierre')
+    fr.append(['Modelo','Motivo','Rutas','Proporción'])
+    for row in cierres.itertuples(index=False): fr.append(list(row))
+    dic=wb.create_sheet('Diccionario')
+    dic.append(['Variable','Nombre claro','Unidad','Definición'])
+    for variable,(nombre,unidad,descripcion) in DEFINICIONES.items():
+        dic.append([variable,nombre,unidad,descripcion])
     md=wb.create_sheet('Parametros')
     md.append(['PARAMETRO','VALOR'])
     def flat(x,prefix=''):
@@ -53,10 +89,11 @@ def crear_excel(c,comparacion,detalle,ejemplos,bandas,max_filas=100000,modo='fij
         'Estas probabilidades dependen de supuestos, ventana de calibracion, datos y semilla. No son garantias.',
         'No se incluyen intereses, impuestos, cambios de margen, liquidez del futuro ni liquidacion fisica.'
     ]: notes.append([line])
-    m=wb.create_sheet('Resultados_ruta'); m.append(list(detalle.columns))
-    for row in detalle.head(max_filas).itertuples(index=False,name=None):
-        m.append([None if str(v)=='nan' else v for v in row])
-    if len(detalle)>max_filas: notes.append([f'Resultados_ruta limitado a {max_filas:,} filas de {len(detalle):,}; resumen usa todas las rutas.'])
+    m=wb.create_sheet('Rutas_ejemplo'); m.append(list(detalle.columns))
+    for modelo in detalle.modelo.unique():
+        for row in detalle[detalle.modelo==modelo].head(1).itertuples(index=False,name=None):
+            m.append([None if str(v)=='nan' else v for v in row])
+    notes.append(['Estadisticas_variable usa todas las rutas de cada modelo; Rutas_ejemplo muestra una ruta por modelo para auditoría.'])
     fechas,_=calendario(c)
     tr=wb.create_sheet('Trayectorias_muestra')
     tr.append(['Modelo','Ruta_muestra','Fecha','Spot_MXN_USD'])
