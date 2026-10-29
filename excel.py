@@ -6,6 +6,7 @@ from openpyxl.chart import LineChart,Reference
 from openpyxl.utils import get_column_letter
 from modelos import calendario
 from motor import libro_ruta
+from formato import formato_excel
 
 NAVY='13253B'; BLUE='1570A6'; LIGHT='EAF2F8'; WHITE='FFFFFF'
 
@@ -116,5 +117,34 @@ def crear_excel(c,comparacion,detalle,ejemplos,bandas,estadisticas,cierres,modo=
             maxlen=max((len(str(v.value)) for v in list(col)[:1000] if v.value is not None),default=10)
             sheet.column_dimensions[letter].width=min(max(13,maxlen+2),70)
     for cell in ws[7]: cell.fill=PatternFill('solid',fgColor=BLUE);cell.font=Font(bold=True,color=WHITE)
+    # Formato nativo: los importes siguen siendo números editables en Excel.
+    for sheet in wb:
+        header_row = 7 if sheet.title == 'Resumen' else 1
+        headers = [cell.value for cell in sheet[header_row]]
+        for row in sheet.iter_rows(min_row=header_row+1):
+            for cell, header in zip(row, headers):
+                fmt = formato_excel(header)
+                if sheet.title == 'Estadisticas_variable':
+                    fmt = None
+                    if cell.column >= 7:
+                        variable = sheet.cell(cell.row, 2).value
+                        fmt = formato_excel(variable)
+                        if cell.column == 8:
+                            unidad = sheet.cell(cell.row, 4).value
+                            fmt = '#,##0.00 "MXN²"' if unidad == 'MXN' else '#,##0.0000 "(MXN/USD)²"' if unidad == 'MXN/USD' else '0.0000'
+                        elif variable in ('capital_suficiente_horizonte', 'cierre_forzoso'):
+                            fmt = '0.00%'
+                if sheet.title == 'Parametros' and cell.column == 2:
+                    key = str(sheet.cell(cell.row, 1).value)
+                    if key.endswith(('margen_fraccion','mantenimiento_fraccion','objetivo_fraccion','media_log_diaria','sigma_diaria','mu_diaria')):
+                        fmt = '0.0000%'
+                    elif key.endswith(('capital','margen_inicial','margen_mantenimiento','objetivo_reposicion','comision_entrada','comision_salida')):
+                        fmt = formato_excel('capital')
+                    elif key in ('s0','logistica.location','logistica.scale','operacion.tick','operacion.deslizamiento_por_lado'):
+                        fmt = formato_excel('spot')
+                if fmt and isinstance(cell.value, (int, float)) and not isinstance(cell.value, bool):
+                    cell.number_format = fmt
+    ws['B3'].number_format = '"$"#,##0.00'
     wb.active=0
     stream=BytesIO();wb.save(stream);return stream.getvalue()
+
