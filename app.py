@@ -11,6 +11,7 @@ from modelos import cargar,calendario
 from motor import simular,calibrar_precios,MODELOS,validar,libro_ruta
 from excel import crear_excel,DEFINICIONES
 from formato import tabla_formateada, estadisticas_formateadas, valor_formateado
+from aportaciones import mostrar_aportaciones
 
 st.set_page_config(page_title='Futuros USD/MXN',page_icon='📈',layout='wide')
 st.title('Futuros USD/MXN | Simulador de liquidez y riesgo')
@@ -84,23 +85,23 @@ if ejecutar:
             progreso[m]=hecho/total
             progress.progress(min(1.,sum(progreso.values())/len(modelos)),text=f'{m}: {hecho:,}/{total:,}')
         with st.spinner('Calculando llamadas, capital y riesgo por trayectoria...'):
-            comp,detalle,ejemplos,bandas,estadisticas,cierres=simular(c,modelos,int(rutas),int(lote),int(semilla),modo,contratos,progreso=avance,con_estadisticas=True)
-            xlsx=crear_excel(c,comp,detalle,ejemplos,bandas,estadisticas,cierres,modo=modo)
+            comp,detalle,ejemplos,bandas,estadisticas,cierres,aportes=simular(c,modelos,int(rutas),int(lote),int(semilla),modo,contratos,progreso=avance,con_estadisticas=True,con_aportaciones=True)
+            xlsx=crear_excel(c,comp,detalle,ejemplos,bandas,estadisticas,cierres,modo=modo,aportaciones=aportes)
         progress.empty()
-        st.session_state['resultado']=(comp,detalle,ejemplos,bandas,estadisticas,cierres,xlsx,deepcopy(c),fingerprint,modo)
+        st.session_state['resultado']=(comp,detalle,ejemplos,bandas,estadisticas,cierres,xlsx,deepcopy(c),fingerprint,modo,aportes)
     except Exception as ex: st.error(f'Simulación detenida: {ex}')
-if 'resultado' in st.session_state and len(st.session_state['resultado']) != 10:
+if 'resultado' in st.session_state and len(st.session_state['resultado']) != 11:
     del st.session_state['resultado']
-    st.info('Se actualizó el formato de resultados. Ejecute nuevamente la simulación para ver los estadísticos por variable.')
+    st.info('Se actualizó el formato de resultados. Ejecute nuevamente la simulación para ver las aportaciones por fecha y sus estadísticos.')
 if 'resultado' in st.session_state:
-    comp,detalle,ejemplos,bandas,estadisticas,cierres,xlsx,cr,old,modo_resultado=st.session_state['resultado']
+    comp,detalle,ejemplos,bandas,estadisticas,cierres,xlsx,cr,old,modo_resultado,aportes=st.session_state['resultado']
     if old!=fingerprint: st.warning('Los parámetros cambiaron. Los resultados corresponden a la última ejecución; vuelva a ejecutar para actualizarlos.')
     st.download_button('Descargar Excel',xlsx,file_name='futuros_usdmxn_montecarlo.xlsx',mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     st.subheader('Comparativa de modelos')
     cols=['modelo','simulaciones','prob_capital_suficiente','prob_cierre_forzoso','mediana_neta','p95_capital_requerido','VaR95_neto','VaR99_neto']
     st.dataframe(tabla_formateada(comp[cols]),use_container_width=True)
     st.caption('Capital suficiente = margen inicial + costo de entrada + llamadas hipotéticas hasta el cierre ≤ capital. VaR positivo indica pérdida; puede ser negativo si el cuantil aún representa ganancia.')
-    tabs=st.tabs(['Trayectorias','Liquidez y riesgo','Estadísticos por variable','Diccionario','Supuestos'])
+    tabs=st.tabs(['Trayectorias','Liquidez y riesgo','Estadísticos por variable','Diccionario','Supuestos','Aportaciones por fecha'])
     with tabs[0]:
         fechas,_=calendario(cr)
         visibles=st.slider('Trayectorias visibles por modelo',min_value=1,max_value=5,value=1)
@@ -161,5 +162,8 @@ if 'resultado' in st.session_state:
         st.markdown('**Futuros:** contrato DA de USD 10,000; F=S redondeado al tick como aproximación. Posición cerrada antes del vencimiento. Sin intereses, impuestos, cambios de margen, profundidad ni base de futuros observada.')
         st.markdown('**Cuentas:** P&G diario = dirección × contratos × USD por contrato × cambio del futuro entre sesiones. Se repone el margen si cae bajo mantenimiento; sin caja suficiente, se cierra la posición.')
         st.markdown('**Colas:** ARMA-GARCH-t exponenciado puede producir colas extremas y una media teórica del precio no finita. Por eso se priorizan medianas y cuantiles. El ES es muestral y puede ser inestable.')
+    with tabs[5]:
+        mostrar_aportaciones(aportes,comp)
 else: st.info('Configure el escenario y pulse **Ejecutar Monte Carlo**.')
+
 

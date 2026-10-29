@@ -8,6 +8,7 @@ calcula en un libro contrafactual sin cierre forzoso para evitar censura.
 """
 from copy import deepcopy
 from datetime import date
+from tempfile import TemporaryFile
 import numpy as np
 import pandas as pd
 from modelos import calendario, generar
@@ -41,7 +42,7 @@ def parametros(c,n,modo):
     return n*mi_unit,n*mt_unit,n*objetivo_unit,ce,cs
 
 
-def procesar_lote(precios,c,n,modo):
+def procesar_lote(precios,c,n,modo,con_aportaciones=False):
     """Cuentas vectorizadas. Una ruta puede cerrar por falta de liquidez.
 
     El libro ilimitado sigue hasta el cierre para estimar el capital que habria
@@ -63,6 +64,7 @@ def procesar_lote(precios,c,n,modo):
     max_llamada=np.zeros(N); dia_max=np.full(N,-1,dtype=int); fx_max=np.full(N,np.nan)
     llamadas_hip=np.zeros(N); n_llamadas_hip=np.zeros(N,dtype=int)
     max_llamada_hip=np.zeros(N); dia_max_hip=np.full(N,-1,dtype=int)
+    aportaciones=np.zeros_like(x) if con_aportaciones else None
     caja_min=caja.copy(); patrimonio_min=caja+margen
     prev=f[:,0]
     for j in range(1,len(fechas)):
@@ -72,6 +74,7 @@ def procesar_lote(precios,c,n,modo):
         margen_hip+=delta; pnl_hip+=delta
         if j<c['dias']:
             req_hip=np.where(margen_hip<mt,obj-margen_hip,0.)
+            if con_aportaciones: aportaciones[:,j]=req_hip
             nueva=req_hip>max_llamada_hip
             dia_max_hip=np.where(nueva,j,dia_max_hip)
             max_llamada_hip=np.maximum(max_llamada_hip,req_hip)
@@ -104,7 +107,7 @@ def procesar_lote(precios,c,n,modo):
     if not np.allclose(caja_hip+margen_hip,p['capital']+pnl_hip-ce,atol=1e-6):
         raise AssertionError('No concilia libro hipotetico')
     cap_req=mi+ce+llamadas_hip
-    return pd.DataFrame({
+    resultado=pd.DataFrame({
         'pnl_bruto':pnl,'ganancia_neta':caja-p['capital'],'efectivo_retirar':caja,
         'capital_inyectado':mi+ce+llamadas,'depositos_llamadas':llamadas,
         'numero_llamadas':n_llamadas,'llamada_maxima':max_llamada,
@@ -117,6 +120,7 @@ def procesar_lote(precios,c,n,modo):
         'capital_suficiente_horizonte':cap_req<=p['capital']+1e-9,
         'cierre_forzoso':motivo=='sin_liquidez',
     })
+    return (resultado,aportaciones) if con_aportaciones else resultado
 
 
 def resumen(df,c,modelo):
@@ -202,7 +206,7 @@ def estadisticas_por_variable(df, modelo):
     return filas
 
 
-def simular(c,modelos=MODELOS,rutas=100000,lote=5000,semilla=None,modo='fijo',contratos=None,muestras=5,progreso=None,con_estadisticas=False):
+def simular(c,modelos=MODELOS,rutas=100000,lote=5000,semilla=None,modo='fijo',contratos=None,muestras=5,progreso=None,con_estadisticas=False,con_aportaciones=False):
     """Simula en lotes, conserva resultados por ruta y pocas trayectorias.
 
     La misma semilla y los mismos parametros de precio reproducen identicas
@@ -213,44 +217,62 @@ def simular(c,modelos=MODELOS,rutas=100000,lote=5000,semilla=None,modo='fijo',co
     validar(c,n,modo)
     if rutas<1 or lote<1: raise ValueError('Rutas y tamano de lote deben ser positivos')
     modelo_list=list(modelos); todos=[]; resumidos=[]; estadisticos=[]; cierres=[]; ejemplos={}; bandas=[]
+    resumen_aportes=[]
     base=c['semilla'] if semilla is None else int(semilla)
     for k,nombre in enumerate(modelo_list):
         if nombre not in MODELOS: raise ValueError(f'Modelo desconocido: {nombre}')
-        partes=[]; sample=[]; done=0; num=0
-        while done<rutas:
-            cantidad=min(lote,rutas-done)
-            # Semillas por lote: estabilidad de rutas ante cambios contables.
-            paths=generar(c,nombre,cantidad,base+100000*k+num)
-            result=procesar_lote(paths,c,n,modo)
-            result.insert(0,'ruta',np.arange(done+1,done+cantidad+1))
-            result.insert(0,'modelo',nombre)
-            partes.append(result)
-            if len(sample)<muestras:
-                take=min(muestras-len(sample),cantidad)
-                sample.extend(paths[:take].tolist())
-            done+=cantidad; num+=1
-            if progreso: progreso(nombre,done,rutas)
-        df=pd.concat(partes,ignore_index=True)
-        resumidos.append(resumen(df,c,nombre))
-        estadisticos.extend(estadisticas_por_variable(df,nombre))
-        conteos=df['motivo_cierre'].value_counts()
-        cierres.extend({'modelo':nombre,'motivo_cierre':motivo,'rutas':int(cantidad),
-                        'proporcion':float(cantidad/len(df))}
-                       for motivo,cantidad in conteos.items())
-        todos.append(df.head(min(20000,len(df))).copy())
-        del df
-        ejemplos[nombre]=np.asarray(sample)
-        # Banda de precios de muestra guardada; no se confunde con la banda de todas las rutas.
-        q=np.quantile(ejemplos[nombre],[.05,.5,.95],axis=0)
-        for j in range(c['dias']+1): bandas.append({'modelo':nombre,'dia':j,'p05_muestra':q[0,j],'mediana_muestra':q[1,j],'p95_muestra':q[2,j]})
+        # Cuantiles exactos sobre todas las rutas; respaldo temporal en disco.
+        with TemporaryFile() as archivo_aportes:
+            if con_aportaciones:
+                diario=np.memmap(archivo_aportes,dtype='float64',mode='w+',shape=(c['dias']+1,rutas))
+            partes=[]; sample=[]; done=0; num=0
+            while done<rutas:
+                cantidad=min(lote,rutas-done)
+                # Semillas por lote: estabilidad de rutas ante cambios contables.
+                paths=generar(c,nombre,cantidad,base+100000*k+num)
+                if con_aportaciones:
+                    result,aportes_lote=procesar_lote(paths,c,n,modo,con_aportaciones=True)
+                    diario[:,done:done+cantidad]=aportes_lote.T
+                    del aportes_lote
+                else:
+                    result=procesar_lote(paths,c,n,modo)
+                result.insert(0,'ruta',np.arange(done+1,done+cantidad+1))
+                result.insert(0,'modelo',nombre)
+                partes.append(result)
+                if len(sample)<muestras:
+                    take=min(muestras-len(sample),cantidad)
+                    sample.extend(paths[:take].tolist())
+                done+=cantidad; num+=1
+                if progreso: progreso(nombre,done,rutas)
+            df=pd.concat(partes,ignore_index=True)
+            resumidos.append(resumen(df,c,nombre))
+            estadisticos.extend(estadisticas_por_variable(df,nombre))
+            conteos=df['motivo_cierre'].value_counts()
+            cierres.extend({'modelo':nombre,'motivo_cierre':motivo,'rutas':int(cantidad),
+                            'proporcion':float(cantidad/len(df))}
+                           for motivo,cantidad in conteos.items())
+            todos.append(df.head(min(20000,len(df))).copy())
+            if con_aportaciones:
+                from aportaciones import resumir_aportaciones
+                fechas,_=calendario(c)
+                mi,mt,obj,ce,cs=parametros(c,n,modo)
+                reserva=c['operacion']['capital']-mi-ce
+                resumen_aportes.extend(resumir_aportaciones(diario,fechas,nombre,reserva))
+                del diario
+            del df
+            ejemplos[nombre]=np.asarray(sample)
+            # Banda de precios de muestra guardada; no se confunde con la banda de todas las rutas.
+            q=np.quantile(ejemplos[nombre],[.05,.5,.95],axis=0)
+            for j in range(c['dias']+1): bandas.append({'modelo':nombre,'dia':j,'p05_muestra':q[0,j],'mediana_muestra':q[1,j],'p95_muestra':q[2,j]})
     detalle=pd.concat(todos,ignore_index=True)
     comparacion=pd.DataFrame(resumidos)
     resultado_base=(comparacion,detalle,ejemplos,pd.DataFrame(bandas))
-    if not con_estadisticas:
+    if not con_estadisticas and not con_aportaciones:
         # Compatibilidad durante una actualización de Streamlit: una sesión
         # que todavía ejecuta el app.py anterior espera cuatro elementos.
         return resultado_base
-    return resultado_base+(pd.DataFrame(estadisticos),pd.DataFrame(cierres))
+    resultado=resultado_base+(pd.DataFrame(estadisticos),pd.DataFrame(cierres)) if con_estadisticas else resultado_base
+    return resultado+(pd.DataFrame(resumen_aportes),) if con_aportaciones else resultado
 
 
 def calibrar_precios(precios,c):
@@ -300,3 +322,4 @@ def libro_ruta(precios,c,n=None,modo='fijo'):
         rows.append({'fecha':fechas[j].isoformat(),'spot':x[j],'futuro_proxy':f[j],'sesion':bool(sesiones[j]),'pnl_dia':dp,'pnl_acumulado':pnl_acum,'llamada':call,'liquidez':cash,'margen':margin,'patrimonio':cash+margin,'estado':estado})
         if estado.startswith('cierre'): break
     return pd.DataFrame(rows)
+
