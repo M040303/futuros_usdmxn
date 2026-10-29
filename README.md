@@ -66,9 +66,30 @@ Para estimar la suficiencia de capital se lleva una **segunda cuenta hipotética
 
 El modo porcentual permite explorar la estrategia del profesor: margen inicial como fracción del nocional (5 % inicialmente), mantenimiento como 11/15 del inicial y objetivo igual al inicial. El número de contratos se elige explícitamente: la app no equipara automáticamente todo el capital a margen porque esa elección eleva el riesgo de llamada y de pérdidas superiores al capital inicial.
 
+## Aportaciones por fecha
+
+La pestaña **Aportaciones por fecha** muestra, para cada modelo, mediana y P95
+de las llamadas acumuladas, P95 de la llamada diaria y reserva disponible tras
+pagar el margen inicial y el costo de entrada. Se calculan cuantiles exactos
+sobre todas las rutas, usando un archivo temporal por modelo para el detalle
+diario. El Excel de la app incluye la hoja `Aportaciones_fecha`.
+
+Las curvas siguen la cuenta hipotética sin cierre forzoso. Excluyen margen
+inicial, liquidación final y costo de salida; al cierre programado no hay
+reposición, igual que en el motor original. Los percentiles son por fecha,
+no una trayectoria ni una banda de confianza simultánea. No deben sumarse
+los P95 diarios. El P95 acumulado final dimensiona la reserva de llamadas de
+todo el periodo; el faltante descuenta la reserva que ya está disponible.
+Una aportación transfiere caja al margen y no es una pérdida adicional.
+
+Pruebas: `python probar_aportaciones.py` concilia con libros individuales,
+verifica días sin sesión, posiciones largas/cortas, márgenes fijo/porcentual,
+colas sin censura por cierre, más de 20,000 rutas y formatos Excel.
+
 ## Archivos
 
 - `app.py`: controles y visualizaciones Streamlit.
+- `aportaciones.py`: cuantiles por fecha y gráficas de llamadas de margen.
 - `ejecutar.py`: ejecución por consola y generación de Excel.
 - `modelos.py`: generadores de spot y verificaciones originales de R.
 - `motor.py`: cuentas vectorizadas, suficiencia, VaR y flujo por trayectoria.
@@ -81,3 +102,4 @@ El modo porcentual permite explorar la estrategia del profesor: margen inicial c
 ## Pendientes para una versión de uso real
 
 Obtener cotizaciones y profundidad del futuro DA específico; verificar garantías y costos del intermediario; validar calendario de sesiones; reestimar y someter los modelos a pruebas fuera de muestra y backtesting de VaR; añadir choques de estrés y costos de financiamiento. El prototipo calcula riesgo condicional a supuestos y **no** valida que el precio futuro o la liquidez simulados sean correctos.
+

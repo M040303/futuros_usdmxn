@@ -2,6 +2,8 @@
 import re
 
 DINERO = {
+    'aporte_acumulado_mediana', 'aporte_acumulado_p95', 'aporte_diario_mediana',
+    'aporte_diario_p95', 'reserva_disponible', 'aporte_adicional_p95',
     'capital', 'pnl_bruto', 'ganancia_neta', 'efectivo_retirar',
     'capital_inyectado', 'depositos_llamadas', 'llamada_maxima',
     'caja_minima', 'patrimonio_minimo', 'pnl_bruto_horizonte',
@@ -54,3 +56,4 @@ def estadisticas_formateadas(tabla, columnas):
         elif fila.variable in ('capital_suficiente_horizonte', 'cierre_forzoso'):
             estilo.format('{:.2%}', subset=([indice], normales), na_rep='—')
     return estilo
+

@@ -40,7 +40,7 @@ DEFINICIONES = {
     'cierre_forzoso': ('Cierre por falta de liquidez', '0/1', 'Verdadero si una llamada impaga obligó a cerrar antes de la fecha programada.'),
 }
 
-def crear_excel(c,comparacion,detalle,ejemplos,bandas,estadisticas=None,cierres=None,modo='fijo'):
+def crear_excel(c,comparacion,detalle,ejemplos,bandas,estadisticas=None,cierres=None,modo='fijo',aportaciones=None):
     # Compatibilidad con sesiones anteriores de Streamlit durante el despliegue.
     if estadisticas is None or cierres is None:
         resumenes=[]; motivos=[]
@@ -119,6 +119,13 @@ def crear_excel(c,comparacion,detalle,ejemplos,bandas,estadisticas=None,cierres=
             for row in ledger.itertuples(index=False,name=None): sheet.append(list(row))
     b=wb.create_sheet('Bandas_muestra');b.append(['Modelo','Dia','p05','Mediana','p95'])
     for row in bandas.itertuples(index=False): b.append(list(row))
+    if aportaciones is not None:
+        ap=wb.create_sheet('Aportaciones_fecha')
+        ap.append(list(aportaciones.columns))
+        for row in aportaciones.itertuples(index=False,name=None):
+            ap.append(list(row))
+        notes.append(['Aportaciones_fecha: percentiles exactos por fecha sobre todas las simulaciones. Cuenta hipotética sin cierre forzoso. No incluye margen inicial ni costos.'])
+        notes.append(['P95 por fecha no es una trayectoria ni una banda simultánea del 95 %. No sumar percentiles diarios. El P95 acumulado final dimensiona la reserva de llamadas de todo el periodo.'])
     for sheet in wb:
         sheet.freeze_panes='B2'; sheet.sheet_view.showGridLines=False
         for cell in sheet[1]: cell.fill=PatternFill('solid',fgColor=NAVY);cell.font=Font(bold=True,color=WHITE,size=11)
@@ -158,4 +165,5 @@ def crear_excel(c,comparacion,detalle,ejemplos,bandas,estadisticas=None,cierres=
     ws['B3'].number_format = '"$"#,##0.00'
     wb.active=0
     stream=BytesIO();wb.save(stream);return stream.getvalue()
+
 
