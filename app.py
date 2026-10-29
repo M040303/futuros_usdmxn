@@ -99,12 +99,14 @@ if 'resultado' in st.session_state:
     tabs=st.tabs(['Trayectorias','Liquidez y riesgo','Resultados por ruta','Supuestos'])
     with tabs[0]:
         fechas,_=calendario(cr)
+        visibles=st.slider('Trayectorias visibles por modelo',min_value=1,max_value=5,value=1)
         fig=go.Figure()
         for modelo,paths in ejemplos.items():
-            for i,path in enumerate(paths): fig.add_trace(go.Scatter(x=fechas,y=path,name=f'{modelo} {i+1}',mode='lines',line={'width':1.4},opacity=.75))
+            for i,path in enumerate(paths[:visibles]):
+                fig.add_trace(go.Scatter(x=fechas,y=path,name=f'{modelo} {i+1}',mode='lines',line={'width':1.8},opacity=.85))
         fig.update_layout(title='Muestra de trayectorias de spot',xaxis_title='Fecha',yaxis_title='MXN/USD',template='plotly_white')
         st.plotly_chart(fig,use_container_width=True)
-        st.caption('Las líneas mostradas son una pequeña muestra de rutas; los estadísticos usan todas las simulaciones.')
+        st.caption('Cada línea es un posible camino del dólar. El control solo cambia cuántos ejemplos ves; los estadísticos siguen usando todas las simulaciones.')
     with tabs[1]:
         fig2=go.Figure()
         for _,row in comp.iterrows(): fig2.add_trace(go.Bar(name=row.modelo,x=['Capital suficiente','Cierre forzoso','Pérdida neta'],y=[row.prob_capital_suficiente,row.prob_cierre_forzoso,row.prob_perdida_neta]))
