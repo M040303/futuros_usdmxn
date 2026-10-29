@@ -3,6 +3,7 @@ from copy import deepcopy
 import numpy as np
 from modelos import cargar,generar
 from motor import procesar_lote,libro_ruta,simular
+from excel import DEFINICIONES
 
 def probar():
     c=cargar()
@@ -24,8 +25,15 @@ def probar():
     c3=deepcopy(c); c3['operacion']['capital']=100000.
     x=procesar_lote(np.full((1,c3['dias']+1),c3['s0']),c3,3,'fijo').iloc[0]
     assert np.isclose(x.ganancia_neta,-330.) and x.numero_llamadas==0
-    a=simular(c,['gbm'],100,100,42)[0]
-    b=simular(c,['gbm'],100,100,42)[0]
-    assert a.equals(b)
-    print('Aprobadas: 120 conciliaciones, cierre forzoso, precio plano, reproducibilidad.')
+    a=simular(c,['gbm'],100,100,42)
+    b=simular(c,['gbm'],100,100,42)
+    assert a[0].equals(b[0])
+    detalle=a[1]; estadisticas=a[4]; cierres=a[5]
+    assert set(detalle.columns)==set(DEFINICIONES)
+    assert estadisticas.observaciones.max()==100
+    x=estadisticas[estadisticas.variable=='ganancia_neta'].iloc[0]
+    assert np.isclose(x.media,detalle.ganancia_neta.mean())
+    assert np.isclose(x.varianza,detalle.ganancia_neta.var(ddof=1))
+    assert cierres.rutas.sum()==100
+    print('Aprobadas: 120 conciliaciones, cierre forzoso, precio plano, reproducibilidad y estadísticas completas.')
 if __name__=='__main__': probar()
