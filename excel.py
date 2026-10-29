@@ -4,8 +4,9 @@ from openpyxl import Workbook
 from openpyxl.styles import Font,PatternFill,Alignment
 from openpyxl.chart import LineChart,Reference
 from openpyxl.utils import get_column_letter
+import pandas as pd
 from modelos import calendario
-from motor import libro_ruta
+from motor import libro_ruta,estadisticas_por_variable
 from formato import formato_excel
 
 NAVY='13253B'; BLUE='1570A6'; LIGHT='EAF2F8'; WHITE='FFFFFF'
@@ -39,7 +40,17 @@ DEFINICIONES = {
     'cierre_forzoso': ('Cierre por falta de liquidez', '0/1', 'Verdadero si una llamada impaga obligó a cerrar antes de la fecha programada.'),
 }
 
-def crear_excel(c,comparacion,detalle,ejemplos,bandas,estadisticas,cierres,modo='fijo'):
+def crear_excel(c,comparacion,detalle,ejemplos,bandas,estadisticas=None,cierres=None,modo='fijo'):
+    # Compatibilidad con sesiones anteriores de Streamlit durante el despliegue.
+    if estadisticas is None or cierres is None:
+        resumenes=[]; motivos=[]
+        for nombre,grupo in detalle.groupby('modelo',sort=False):
+            resumenes.extend(estadisticas_por_variable(grupo,nombre))
+            motivos.extend({'modelo':nombre,'motivo_cierre':motivo,'rutas':int(n),
+                            'proporcion':float(n/len(grupo))}
+                           for motivo,n in grupo.motivo_cierre.value_counts().items())
+        estadisticas=pd.DataFrame(resumenes)
+        cierres=pd.DataFrame(motivos)
     wb=Workbook(); ws=wb.active; ws.title='Resumen'
     ws.append(['FUTUROS USD/MXN | COMPARACION MONTE CARLO'])
     ws.append(['Escenario academico prospectivo; cotizacion del futuro aproximada por F = spot'])

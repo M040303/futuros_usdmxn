@@ -3,7 +3,7 @@ from copy import deepcopy
 import numpy as np
 from modelos import cargar,generar
 from motor import procesar_lote,libro_ruta,simular
-from excel import DEFINICIONES
+from excel import DEFINICIONES,crear_excel
 
 def probar():
     c=cargar()
@@ -25,7 +25,9 @@ def probar():
     c3=deepcopy(c); c3['operacion']['capital']=100000.
     x=procesar_lote(np.full((1,c3['dias']+1),c3['s0']),c3,3,'fijo').iloc[0]
     assert np.isclose(x.ganancia_neta,-330.) and x.numero_llamadas==0
-    assert len(simular(c,['gbm'],100,100,42))==4
+    anterior=simular(c,['gbm'],100,100,42)
+    assert len(anterior)==4
+    assert len(crear_excel(c,*anterior))>1000
     a=simular(c,['gbm'],100,100,42,con_estadisticas=True)
     b=simular(c,['gbm'],100,100,42,con_estadisticas=True)
     assert a[0].equals(b[0])
