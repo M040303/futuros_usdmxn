@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "inicio": "2026-10-13",
+  "s0": 18.3765,
+  "dias": 30,
+  "semilla": 20261026,
+  "feriados": [
+    "2026-11-02"
+  ],
+  "logistica": {
+    "location": 17.5836652,
+    "scale": 0.2752874,
+    "dependencia": "precios iid desde dia 1"
+  },
+  "gbm": {
+    "media_log_diaria": -1.905012633417603e-05,
+    "sigma_diaria": 0.004525309795819837,
+    "mu_diaria": -8.810911960104542e-06,
+    "ddof": 1
+  },
+  "garch": {
+    "coeficientes": {
+      "ar1": 1.4784954504363892,
+      "ar2": -0.9925636555926727,
+      "ma1": -1.5112205632748337,
+      "ma2": 1.0132106448808686,
+      "omega": 5.356280196521107e-07,
+      "alpha1": 0.08259708994160381,
+      "beta1": 0.9164027922900821,
+      "shape": 2.9779685694816966
+    },
+    "estado": {
+      "r_ultimo_penultimo": [
+        0.006273822664693007,
+        -0.008562714769356994
+      ],
+      "residuo_ultimo_penultimo": [
+        0.006319300269742823,
+        -0.007425706882990898
+      ],
+      "varianza_ultima": 4.849902238091606e-05
+    },
+    "convergence": 0.0,
+    "condH": "NaN",
+    "persistencia": 0.9989998822316859
+  },
+  "operacion": {
+    "capital": 100000.0,
+    "contratos_base": 3,
+    "direccion": 1,
+    "usd_por_contrato": 10000,
+    "tick": 0.0001,
+    "vencimiento_referencia": "2026-12-14",
+    "liquidacion_referencia": "2026-12-16",
+    "cierre_programado": "2026-11-12",
+    "margen_inicial": 15000.0,
+    "margen_mantenimiento": 11000.0,
+    "margen_fraccion": 0.05,
+    "comision_por_lado": 50.0,
+    "deslizamiento_por_lado": 0.0005,
+    "base_spot_futuro": 0.0,
+    "retiro_excedentes": false,
+    "interes_caja_y_margen": 0.0,
+    "contrato_referencia": "DA diciembre 2026, referencia académica; precio real no disponible",
+    "comision_entrada": 50.0,
+    "comision_salida": 50.0,
+    "mantenimiento_fraccion": 0.7333333333333333,
+    "objetivo_reposicion": 15000.0,
+    "objetivo_fraccion": 1.0
+  },
+  "fuentes": {
+    "xlsx_sha256": "27669bce7945c71e8a92ed3d5a0970985baa11b2864098758665eaf151c10c6b",
+    "RData_sha256": "526e48c7e45fe7682890d0db8f9ccf48e4a55971c7610f51c9c37a6ee76a1bfa"
+  }
+}
