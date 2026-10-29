@@ -163,7 +163,46 @@ def resumen(df,c,modelo):
     return row
 
 
-def simular(c,modelos=MODELOS,rutas=10000,lote=5000,semilla=None,modo='fijo',contratos=None,muestras=5,progreso=None):
+def estadisticas_por_variable(df, modelo):
+    """Estadísticos sobre todas las rutas, incluidos los indicadores binarios.
+
+    El día -1 significa que no hubo llamada y se excluye del resumen de días.
+    Las cotizaciones de llamada faltantes se excluyen del resumen de cotizaciones.
+    """
+    filas = []
+    for columna in df.columns:
+        if columna in ('modelo', 'ruta', 'motivo_cierre'):
+            continue
+        if not (pd.api.types.is_numeric_dtype(df[columna]) or pd.api.types.is_bool_dtype(df[columna])):
+            continue
+        valores = df[columna].to_numpy(dtype=float)
+        if columna.startswith('dia_llamada_maxima'):
+            valores = np.where(valores < 0, np.nan, valores)
+        validos = valores[np.isfinite(valores)]
+        fila = {'modelo': modelo, 'variable': columna,
+                'observaciones': int(len(validos)),
+                'sin_dato': int(len(valores) - len(validos))}
+        if len(validos):
+            fila.update(media=float(np.mean(validos)),
+                        varianza=float(np.var(validos, ddof=1)) if len(validos) > 1 else 0.,
+                        desviacion=float(np.std(validos, ddof=1)) if len(validos) > 1 else 0.,
+                        minimo=float(np.min(validos)),
+                        p05=float(np.quantile(validos, .05)),
+                        p25=float(np.quantile(validos, .25)),
+                        mediana=float(np.median(validos)),
+                        p75=float(np.quantile(validos, .75)),
+                        p95=float(np.quantile(validos, .95)),
+                        p99=float(np.quantile(validos, .99)),
+                        maximo=float(np.max(validos)))
+        else:
+            fila.update({k: np.nan for k in ('media', 'varianza', 'desviacion',
+                                               'minimo', 'p05', 'p25', 'mediana',
+                                               'p75', 'p95', 'p99', 'maximo')})
+        filas.append(fila)
+    return filas
+
+
+def simular(c,modelos=MODELOS,rutas=100000,lote=5000,semilla=None,modo='fijo',contratos=None,muestras=5,progreso=None):
     """Simula en lotes, conserva resultados por ruta y pocas trayectorias.
 
     La misma semilla y los mismos parametros de precio reproducen identicas
@@ -173,7 +212,7 @@ def simular(c,modelos=MODELOS,rutas=10000,lote=5000,semilla=None,modo='fijo',con
     n=c['operacion']['contratos_base'] if contratos is None else contratos
     validar(c,n,modo)
     if rutas<1 or lote<1: raise ValueError('Rutas y tamano de lote deben ser positivos')
-    modelo_list=list(modelos); todos=[]; resumidos=[]; ejemplos={}; bandas=[]
+    modelo_list=list(modelos); todos=[]; resumidos=[]; estadisticos=[]; cierres=[]; ejemplos={}; bandas=[]
     base=c['semilla'] if semilla is None else int(semilla)
     for k,nombre in enumerate(modelo_list):
         if nombre not in MODELOS: raise ValueError(f'Modelo desconocido: {nombre}')
@@ -193,6 +232,11 @@ def simular(c,modelos=MODELOS,rutas=10000,lote=5000,semilla=None,modo='fijo',con
             if progreso: progreso(nombre,done,rutas)
         df=pd.concat(partes,ignore_index=True)
         resumidos.append(resumen(df,c,nombre))
+        estadisticos.extend(estadisticas_por_variable(df,nombre))
+        conteos=df['motivo_cierre'].value_counts()
+        cierres.extend({'modelo':nombre,'motivo_cierre':motivo,'rutas':int(cantidad),
+                        'proporcion':float(cantidad/len(df))}
+                       for motivo,cantidad in conteos.items())
         todos.append(df.head(min(20000,len(df))).copy())
         del df
         ejemplos[nombre]=np.asarray(sample)
@@ -201,7 +245,8 @@ def simular(c,modelos=MODELOS,rutas=10000,lote=5000,semilla=None,modo='fijo',con
         for j in range(c['dias']+1): bandas.append({'modelo':nombre,'dia':j,'p05_muestra':q[0,j],'mediana_muestra':q[1,j],'p95_muestra':q[2,j]})
     detalle=pd.concat(todos,ignore_index=True)
     comparacion=pd.DataFrame(resumidos)
-    return comparacion,detalle,ejemplos,pd.DataFrame(bandas)
+    return (comparacion,detalle,ejemplos,pd.DataFrame(bandas),
+            pd.DataFrame(estadisticos),pd.DataFrame(cierres))
 
 
 def calibrar_precios(precios,c):
