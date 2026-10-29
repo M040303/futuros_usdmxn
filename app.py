@@ -83,7 +83,7 @@ if ejecutar:
             progreso[m]=hecho/total
             progress.progress(min(1.,sum(progreso.values())/len(modelos)),text=f'{m}: {hecho:,}/{total:,}')
         with st.spinner('Calculando llamadas, capital y riesgo por trayectoria...'):
-            comp,detalle,ejemplos,bandas,estadisticas,cierres=simular(c,modelos,int(rutas),int(lote),int(semilla),modo,contratos,progreso=avance)
+            comp,detalle,ejemplos,bandas,estadisticas,cierres=simular(c,modelos,int(rutas),int(lote),int(semilla),modo,contratos,progreso=avance,con_estadisticas=True)
             xlsx=crear_excel(c,comp,detalle,ejemplos,bandas,estadisticas,cierres,modo=modo)
         progress.empty()
         st.session_state['resultado']=(comp,detalle,ejemplos,bandas,estadisticas,cierres,xlsx,deepcopy(c),fingerprint,modo)

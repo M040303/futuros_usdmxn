@@ -25,8 +25,9 @@ def probar():
     c3=deepcopy(c); c3['operacion']['capital']=100000.
     x=procesar_lote(np.full((1,c3['dias']+1),c3['s0']),c3,3,'fijo').iloc[0]
     assert np.isclose(x.ganancia_neta,-330.) and x.numero_llamadas==0
-    a=simular(c,['gbm'],100,100,42)
-    b=simular(c,['gbm'],100,100,42)
+    assert len(simular(c,['gbm'],100,100,42))==4
+    a=simular(c,['gbm'],100,100,42,con_estadisticas=True)
+    b=simular(c,['gbm'],100,100,42,con_estadisticas=True)
     assert a[0].equals(b[0])
     detalle=a[1]; estadisticas=a[4]; cierres=a[5]
     assert set(detalle.columns)==set(DEFINICIONES)

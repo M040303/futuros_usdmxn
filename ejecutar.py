@@ -16,7 +16,7 @@ def main():
     if args.capital is not None: c['operacion']['capital']=args.capital
     if args.contratos is not None: c['operacion']['contratos_base']=args.contratos
     def progress(model,done,total): print(f'\r{model}: {done:,}/{total:,}',end='',flush=True)
-    comp,detalle,ejemplos,bandas,estadisticas,cierres=simular(c,args.modelos,args.rutas,args.lote,args.semilla,args.modo,progreso=progress)
+    comp,detalle,ejemplos,bandas,estadisticas,cierres=simular(c,args.modelos,args.rutas,args.lote,args.semilla,args.modo,progreso=progress,con_estadisticas=True)
     print();dest=Path(args.salida);dest.parent.mkdir(parents=True,exist_ok=True)
     dest.write_bytes(crear_excel(c,comp,detalle,ejemplos,bandas,estadisticas,cierres,modo=args.modo))
     columnas=['modelo','simulaciones','prob_capital_suficiente','prob_cierre_forzoso',

@@ -202,7 +202,7 @@ def estadisticas_por_variable(df, modelo):
     return filas
 
 
-def simular(c,modelos=MODELOS,rutas=100000,lote=5000,semilla=None,modo='fijo',contratos=None,muestras=5,progreso=None):
+def simular(c,modelos=MODELOS,rutas=100000,lote=5000,semilla=None,modo='fijo',contratos=None,muestras=5,progreso=None,con_estadisticas=False):
     """Simula en lotes, conserva resultados por ruta y pocas trayectorias.
 
     La misma semilla y los mismos parametros de precio reproducen identicas
@@ -245,8 +245,12 @@ def simular(c,modelos=MODELOS,rutas=100000,lote=5000,semilla=None,modo='fijo',co
         for j in range(c['dias']+1): bandas.append({'modelo':nombre,'dia':j,'p05_muestra':q[0,j],'mediana_muestra':q[1,j],'p95_muestra':q[2,j]})
     detalle=pd.concat(todos,ignore_index=True)
     comparacion=pd.DataFrame(resumidos)
-    return (comparacion,detalle,ejemplos,pd.DataFrame(bandas),
-            pd.DataFrame(estadisticos),pd.DataFrame(cierres))
+    resultado_base=(comparacion,detalle,ejemplos,pd.DataFrame(bandas))
+    if not con_estadisticas:
+        # Compatibilidad durante una actualización de Streamlit: una sesión
+        # que todavía ejecuta el app.py anterior espera cuatro elementos.
+        return resultado_base
+    return resultado_base+(pd.DataFrame(estadisticos),pd.DataFrame(cierres))
 
 
 def calibrar_precios(precios,c):
