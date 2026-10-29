@@ -15,12 +15,12 @@ streamlit run app.py
 Alternativa por consola:
 
 ```bash
-python ejecutar.py --rutas 10000 --lote 5000 --salida resultados/analisis.xlsx
+python ejecutar.py --rutas 100000 --lote 5000 --salida resultados/analisis.xlsx
 python verificar.py
 python probar_motor.py
 ```
 
-Para un millón de rutas por modelo: `python ejecutar.py --rutas 1000000 --lote 5000 --salida resultados/millon.xlsx`. El cálculo se divide en lotes. Los estadísticos usan todas las rutas; el archivo Excel conserva hasta 20,000 filas de detalle por modelo y cinco trayectorias ilustrativas. Requiere memoria suficiente para reunir temporalmente los resultados de un modelo. La primera corrida recomendada es de 10,000 rutas por modelo.
+La app inicia con 100,000 rutas por modelo. Para un millón: `python ejecutar.py --rutas 1000000 --lote 5000 --salida resultados/millon.xlsx`. El cálculo se divide en lotes. Las estadísticas por variable usan **todas** las rutas; la tabla grande de resultados individuales se sustituyó por un resumen y una ruta de ejemplo por modelo. La app conserva hasta 20,000 rutas por modelo para el histograma y para inspeccionar un caso. Requiere memoria suficiente para reunir temporalmente los resultados de un modelo.
 
 Para publicar en Streamlit Community Cloud, subir el contenido de este directorio a un repositorio de GitHub y seleccionar `app.py` como archivo principal. Los datos incluidos son históricos y los parámetros corresponden al escenario de estudio; publicar la app no actualiza las tasas, precios ni contratos automáticamente.
 
@@ -72,11 +72,11 @@ El modo porcentual permite explorar la estrategia del profesor: margen inicial c
 - `ejecutar.py`: ejecución por consola y generación de Excel.
 - `modelos.py`: generadores de spot y verificaciones originales de R.
 - `motor.py`: cuentas vectorizadas, suficiencia, VaR y flujo por trayectoria.
-- `excel.py`: libro con resumen, parámetros, resultados, trayectorias y flujo diario.
+- `excel.py`: libro con resumen, estadísticas por variable, diccionario, parámetros, trayectorias y flujo diario.
 - `configuracion.json`: parámetros editables de escenario y modelos.
 - `data/`: serie histórica y estado de ARMA–GARCH en R.
 - `verificar.py`, `probar_motor.py`: reproducción histórica y conciliación de cuentas.
-- `resultados/ejemplo_10000.xlsx`: corrida ilustrativa de 10,000 rutas por modelo con semilla fija.
+- `resultados/ejemplo_100000.xlsx`: corrida ilustrativa de 100,000 rutas por modelo con semilla fija.
 
 ## Pendientes para una versión de uso real
 
