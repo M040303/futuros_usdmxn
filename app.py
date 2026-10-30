@@ -84,16 +84,16 @@ if ejecutar:
             progreso[m]=hecho/total
             progress.progress(min(1.,sum(progreso.values())/len(modelos)),text=f'{m}: {hecho:,}/{total:,}')
         with st.spinner('Calculando llamadas, capital y riesgo por trayectoria...'):
-            comp,detalle,ejemplos,bandas,estadisticas,cierres=simular(c,modelos,int(rutas),int(lote),int(semilla),modo,contratos,progreso=avance,con_estadisticas=True)
+            comp,detalle,ejemplos,bandas,estadisticas,cierres,distribuciones=simular(c,modelos,int(rutas),int(lote),int(semilla),modo,contratos,progreso=avance,con_estadisticas=True,con_distribuciones=True)
             xlsx=crear_excel(c,comp,detalle,ejemplos,bandas,estadisticas,cierres,modo=modo)
         progress.empty()
-        st.session_state['resultado']=(comp,detalle,ejemplos,bandas,estadisticas,cierres,xlsx,deepcopy(c),fingerprint,modo)
+        st.session_state['resultado']=(comp,detalle,ejemplos,bandas,estadisticas,cierres,distribuciones,xlsx,deepcopy(c),fingerprint,modo)
     except Exception as ex: st.error(f'Simulación detenida: {ex}')
-if 'resultado' in st.session_state and len(st.session_state['resultado']) != 10:
+if 'resultado' in st.session_state and len(st.session_state['resultado']) != 11:
     del st.session_state['resultado']
-    st.info('Se actualizó el formato de resultados. Ejecute nuevamente la simulación para ver los estadísticos por variable.')
+    st.info('Se agregaron gráficas con todas las rutas. Ejecute nuevamente la simulación para generarlas.')
 if 'resultado' in st.session_state:
-    comp,detalle,ejemplos,bandas,estadisticas,cierres,xlsx,cr,old,modo_resultado=st.session_state['resultado']
+    comp,detalle,ejemplos,bandas,estadisticas,cierres,distribuciones,xlsx,cr,old,modo_resultado=st.session_state['resultado']
     if old!=fingerprint: st.warning('Los parámetros cambiaron. Los resultados corresponden a la última ejecución; vuelva a ejecutar para actualizarlos.')
     st.download_button('Descargar Excel',xlsx,file_name='futuros_usdmxn_montecarlo.xlsx',mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     st.subheader('Comparativa de modelos')
@@ -126,11 +126,31 @@ if 'resultado' in st.session_state:
         fc.update_layout(title='Caja, margen y patrimonio por día',xaxis_title='Fecha',yaxis_title='MXN',yaxis_tickprefix='$',yaxis_tickformat=',.2f',template='plotly_white')
         st.plotly_chart(fc,use_container_width=True)
         st.dataframe(tabla_formateada(flujo),use_container_width=True)
-        model=st.selectbox('Modelo para histograma',list(ejemplos))
-        st.plotly_chart(go.Figure(go.Histogram(x=detalle.loc[detalle.modelo==model,'capital_requerido_horizonte'],nbinsx=60)).update_layout(title='Capital necesario hasta el cierre',xaxis_title='MXN',xaxis_tickprefix='$',xaxis_tickformat=',.2f',template='plotly_white'),use_container_width=True)
-        st.caption('El histograma usa hasta 20,000 rutas guardadas por modelo; los estadísticos de la siguiente pestaña usan todas las simulaciones.')
+        st.caption('La distribución del capital requerido se puede comparar entre modelos en la pestaña Estadísticos por variable.')
     with tabs[2]:
         filtro=st.selectbox('Modelo',list(ejemplos),key='filtroestad')
+        st.markdown('**Distribución de resultados por ruta**')
+        variables=list(estadisticas.variable.drop_duplicates())+['motivo_cierre']
+        variable=st.selectbox('Variable para la gráfica',variables,
+                              format_func=lambda v: DEFINICIONES.get(v,(v,'',''))[0],
+                              key='variable_grafica')
+        nombre,unidad,descripcion=DEFINICIONES.get(variable,(variable,'',''))
+        st.caption(descripcion)
+        grafica=distribuciones[distribuciones.variable==variable].sort_values('orden')
+        fig_dist=go.Figure()
+        for modelo in ejemplos:
+            datos=grafica[grafica.modelo==modelo]
+            fig_dist.add_trace(go.Bar(name=modelo,x=datos.grupo,y=datos.rutas,
+                                      customdata=datos.proporcion,
+                                      hovertemplate='%{x}<br>Rutas: %{y:,}<br>Porcentaje: %{customdata:.2%}<extra>%{fullData.name}</extra>'))
+        fig_dist.update_layout(title=f'{nombre} por modelo',barmode='group',
+                               xaxis_title=unidad,yaxis_title='Número de rutas',
+                               xaxis={'categoryorder':'array','categoryarray':grafica.grupo.drop_duplicates().tolist(),
+                                      'tickangle':-50},
+                               template='plotly_white',height=570,legend_title='Modelo',
+                               margin={'b':140})
+        st.plotly_chart(fig_dist,use_container_width=True)
+        st.caption('Cada barra cuenta rutas del modelo. Los intervalos son idénticos entre modelos; las colas agrupan extremos y “Sin llamada” conserva los casos sin evento. Se incluyen todas las simulaciones, aunque la inspección individual se limite a 20,000 rutas.')
         tabla=estadisticas[estadisticas.modelo==filtro].copy()
         tabla['nombre']=tabla.variable.map(lambda v: DEFINICIONES.get(v,(v,'',''))[0])
         tabla['unidad']=tabla.variable.map(lambda v: DEFINICIONES.get(v,('','',''))[1])
@@ -162,4 +182,5 @@ if 'resultado' in st.session_state:
         st.markdown('**Cuentas:** P&G diario = dirección × contratos × USD por contrato × cambio del futuro entre sesiones. Se repone el margen si cae bajo mantenimiento; sin caja suficiente, se cierra la posición.')
         st.markdown('**Colas:** ARMA-GARCH-t exponenciado puede producir colas extremas y una media teórica del precio no finita. Por eso se priorizan medianas y cuantiles. El ES es muestral y puede ser inestable.')
 else: st.info('Configure el escenario y pulse **Ejecutar Monte Carlo**.')
+
 

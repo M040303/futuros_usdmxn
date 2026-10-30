@@ -38,5 +38,14 @@ def probar():
     assert np.isclose(x.media,detalle.ganancia_neta.mean())
     assert np.isclose(x.varianza,detalle.ganancia_neta.var(ddof=1))
     assert cierres.rutas.sum()==100
-    print('Aprobadas: 120 conciliaciones, cierre forzoso, precio plano, reproducibilidad y estadísticas completas.')
+    con_graficas=simular(c,['gbm','logistica'],100,100,42,
+                         con_estadisticas=True,con_distribuciones=True)
+    assert len(con_graficas)==7
+    barras=con_graficas[6]
+    totales=barras.groupby(['modelo','variable']).rutas.sum()
+    assert (totales==100).all(), 'Cada ruta debe aparecer en una barra por variable'
+    comparables=barras[barras.variable=='ganancia_neta'].groupby('modelo').grupo.apply(list)
+    assert comparables.iloc[0]==comparables.iloc[1], 'Los modelos deben compartir intervalos'
+    print('Aprobadas: 120 conciliaciones, cierre forzoso, precio plano, reproducibilidad, estadísticas y gráficas completas.')
 if __name__=='__main__': probar()
+

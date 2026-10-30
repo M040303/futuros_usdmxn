@@ -202,7 +202,72 @@ def estadisticas_por_variable(df, modelo):
     return filas
 
 
-def simular(c,modelos=MODELOS,rutas=100000,lote=5000,semilla=None,modo='fijo',contratos=None,muestras=5,progreso=None,con_estadisticas=False):
+def distribuciones_por_variable(valores_por_modelo, max_barras=35):
+    """Cuenta todas las rutas en barras comparables entre modelos.
+
+    Las barras interiores usan límites comunes. Las dos barras de cola reúnen
+    los valores extremos y evitan que unas pocas rutas oculten el centro.
+    Ausencias y días -1 de llamadas se muestran como "Sin llamada".
+    """
+    if not valores_por_modelo:
+        return pd.DataFrame(columns=['variable','modelo','grupo','orden','rutas','proporcion'])
+    modelos=list(valores_por_modelo)
+    variables=list(next(iter(valores_por_modelo.values())))
+    filas=[]
+    for variable in variables:
+        series={modelo:valores_por_modelo[modelo][variable] for modelo in modelos}
+        if variable=='motivo_cierre':
+            categorias=sorted(set().union(*(set(v.dropna().astype(str)) for v in series.values())))
+            for modelo,valores in series.items():
+                conteos=valores.value_counts(dropna=False)
+                for orden,categoria in enumerate(categorias):
+                    n=int(conteos.get(categoria,0))
+                    filas.append((variable,modelo,categoria,orden,n,n/len(valores)))
+            continue
+
+        numericas={modelo:pd.to_numeric(v,errors='coerce').to_numpy(dtype=float)
+                   for modelo,v in series.items()}
+        validos={modelo:a[np.isfinite(a) & ((a>=0) if variable.startswith('dia_llamada_maxima') else True)]
+                 for modelo,a in numericas.items()}
+        todos=np.concatenate(list(validos.values()))
+        if len(todos)==0:
+            etiquetas=[]; limites=None
+        elif variable in ('capital_suficiente_horizonte','cierre_forzoso'):
+            etiquetas=['No (0)','Sí (1)']; limites=None
+        else:
+            unicos=np.unique(todos)
+            if len(unicos)<=max_barras and np.all(np.isclose(unicos,np.round(unicos))):
+                etiquetas=[f'{int(v):,}' for v in unicos]; limites=None
+            else:
+                bajo,alto=np.quantile(todos,[.005,.995])
+                if bajo==alto:
+                    bajo,alto=float(np.min(todos)),float(np.max(todos))
+                if bajo==alto:
+                    etiquetas=[f'{bajo:,.4g}']; limites=None
+                else:
+                    limites=np.linspace(bajo,alto,max_barras+1)
+                    etiquetas=[f'< {bajo:,.4g}']+[f'{l:,.4g} a {r:,.4g}' for l,r in zip(limites[:-1],limites[1:])]+[f'> {alto:,.4g}']
+        for modelo,a in numericas.items():
+            v=validos[modelo]
+            if variable in ('capital_suficiente_horizonte','cierre_forzoso'):
+                conteos=[int(np.sum(v==0)),int(np.sum(v==1))]
+            elif limites is not None:
+                interior=np.histogram(v[(v>=limites[0]) & (v<=limites[-1])],bins=limites)[0]
+                conteos=[int(np.sum(v<limites[0]))]+interior.tolist()+[int(np.sum(v>limites[-1]))]
+            elif etiquetas:
+                conteos=[int(np.sum(v==float(e.replace(',','')))) for e in etiquetas]
+            else:
+                conteos=[]
+            for orden,(etiqueta,n) in enumerate(zip(etiquetas,conteos)):
+                filas.append((variable,modelo,etiqueta,orden,n,n/len(a)))
+            sin_llamada=int(len(a)-len(v))
+            if sin_llamada:
+                etiqueta='Sin llamada' if variable.startswith('dia_llamada_maxima') or variable=='dolar_llamada_maxima' else 'Sin dato'
+                filas.append((variable,modelo,etiqueta,len(etiquetas),sin_llamada,sin_llamada/len(a)))
+    return pd.DataFrame(filas,columns=['variable','modelo','grupo','orden','rutas','proporcion'])
+
+
+def simular(c,modelos=MODELOS,rutas=100000,lote=5000,semilla=None,modo='fijo',contratos=None,muestras=5,progreso=None,con_estadisticas=False,con_distribuciones=False):
     """Simula en lotes, conserva resultados por ruta y pocas trayectorias.
 
     La misma semilla y los mismos parametros de precio reproducen identicas
@@ -213,6 +278,7 @@ def simular(c,modelos=MODELOS,rutas=100000,lote=5000,semilla=None,modo='fijo',co
     validar(c,n,modo)
     if rutas<1 or lote<1: raise ValueError('Rutas y tamano de lote deben ser positivos')
     modelo_list=list(modelos); todos=[]; resumidos=[]; estadisticos=[]; cierres=[]; ejemplos={}; bandas=[]
+    valores_graficas={} if con_distribuciones else None
     base=c['semilla'] if semilla is None else int(semilla)
     for k,nombre in enumerate(modelo_list):
         if nombre not in MODELOS: raise ValueError(f'Modelo desconocido: {nombre}')
@@ -237,6 +303,8 @@ def simular(c,modelos=MODELOS,rutas=100000,lote=5000,semilla=None,modo='fijo',co
         cierres.extend({'modelo':nombre,'motivo_cierre':motivo,'rutas':int(cantidad),
                         'proporcion':float(cantidad/len(df))}
                        for motivo,cantidad in conteos.items())
+        if con_distribuciones:
+            valores_graficas[nombre]={col:df[col].copy() for col in df.columns if col not in ('modelo','ruta')}
         todos.append(df.head(min(20000,len(df))).copy())
         del df
         ejemplos[nombre]=np.asarray(sample)
@@ -250,7 +318,10 @@ def simular(c,modelos=MODELOS,rutas=100000,lote=5000,semilla=None,modo='fijo',co
         # Compatibilidad durante una actualización de Streamlit: una sesión
         # que todavía ejecuta el app.py anterior espera cuatro elementos.
         return resultado_base
-    return resultado_base+(pd.DataFrame(estadisticos),pd.DataFrame(cierres))
+    resultado=resultado_base+(pd.DataFrame(estadisticos),pd.DataFrame(cierres))
+    if con_distribuciones:
+        return resultado+(distribuciones_por_variable(valores_graficas),)
+    return resultado
 
 
 def calibrar_precios(precios,c):
@@ -300,3 +371,4 @@ def libro_ruta(precios,c,n=None,modo='fijo'):
         rows.append({'fecha':fechas[j].isoformat(),'spot':x[j],'futuro_proxy':f[j],'sesion':bool(sesiones[j]),'pnl_dia':dp,'pnl_acumulado':pnl_acum,'llamada':call,'liquidez':cash,'margen':margin,'patrimonio':cash+margin,'estado':estado})
         if estado.startswith('cierre'): break
     return pd.DataFrame(rows)
+
