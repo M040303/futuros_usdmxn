@@ -117,7 +117,8 @@ def crear_excel(c,comparacion,detalle,ejemplos,bandas,estadisticas=None,cierres=
             ledger=libro_ruta(paths[0],c,modo=modo)
             sheet=wb.create_sheet('Flujo_'+modelo[:20]);sheet.append(list(ledger.columns))
             for row in ledger.itertuples(index=False,name=None): sheet.append(list(row))
-    b=wb.create_sheet('Bandas_muestra');b.append(['Modelo','Dia','p05','Mediana','p95'])
+    b=wb.create_sheet('Bandas_todas_rutas' if 'p05_spot' in bandas else 'Bandas_muestra')
+    b.append(list(bandas.columns))
     for row in bandas.itertuples(index=False): b.append(list(row))
     for sheet in wb:
         sheet.freeze_panes='B2'; sheet.sheet_view.showGridLines=False
@@ -158,4 +159,5 @@ def crear_excel(c,comparacion,detalle,ejemplos,bandas,estadisticas=None,cierres=
     ws['B3'].number_format = '"$"#,##0.00'
     wb.active=0
     stream=BytesIO();wb.save(stream);return stream.getvalue()
+
 

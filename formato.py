@@ -17,6 +17,8 @@ PRECIOS = {'spot', 'futuro_proxy', 'precio_dolar_final',
 
 def tipo(columna):
     nombre = str(columna)
+    if re.fullmatch(r'(p05|mediana|p95)_(spot|caja|margen|patrimonio)',nombre):
+        return 'precio' if nombre.endswith('_spot') else 'dinero'
     if nombre.startswith('prob_') or nombre in ('proporcion', 'Proporción'):
         return 'porcentaje'
     base = re.sub(r'_(promedio_muestral|desviacion_muestral|varianza_muestral|mediana|min|max)$', '', nombre)
@@ -54,3 +56,4 @@ def estadisticas_formateadas(tabla, columnas):
         elif fila.variable in ('capital_suficiente_horizonte', 'cierre_forzoso'):
             estilo.format('{:.2%}', subset=([indice], normales), na_rep='—')
     return estilo
+

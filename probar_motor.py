@@ -46,6 +46,21 @@ def probar():
     assert (totales==100).all(), 'Cada ruta debe aparecer en una barra por variable'
     comparables=barras[barras.variable=='ganancia_neta'].groupby('modelo').grupo.apply(list)
     assert comparables.iloc[0]==comparables.iloc[1], 'Los modelos deben compartir intervalos'
-    print('Aprobadas: 120 conciliaciones, cierre forzoso, precio plano, reproducibilidad, estadísticas y gráficas completas.')
+    con_bandas=simular(c,['gbm'],100,100,42,con_estadisticas=True,con_bandas=True)
+    precios=generar(c,'gbm',100,42)
+    _,series=procesar_lote(precios,c,c['operacion']['contratos_base'],'fijo',con_series=True)
+    bandas=con_bandas[3]
+    for dia in (0,c['dias']//2,c['dias']):
+        fila=bandas[bandas.dia==dia].iloc[0]
+        assert np.isclose(fila.mediana_spot,np.median(precios[:,dia]),atol=1e-5)
+        assert np.isclose(fila.p05_caja,np.quantile(series[0,dia,:],.05),atol=1e-3)
+        assert np.isclose(fila.p95_margen,np.quantile(series[1,dia,:],.95),atol=1e-3)
+        assert np.isclose(fila.mediana_patrimonio,np.median(series[0,dia,:]+series[1,dia,:]),atol=1e-3)
+    cierre,serie_cierre=procesar_lote(path,c2,3,'fijo',con_series=True)
+    dia=int(cierre.iloc[0].dia_cierre)
+    assert np.all(serie_cierre[1,dia:,0]==0)
+    assert np.all(serie_cierre[0,dia:,0]==serie_cierre[0,dia,0])
+    print('Aprobadas: conciliaciones, cierre, reproducibilidad, estadísticas, barras y bandas de todas las rutas.')
 if __name__=='__main__': probar()
+
 

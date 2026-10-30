@@ -6,11 +6,70 @@ import hashlib,json
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import streamlit as st
 from modelos import cargar,calendario
 from motor import simular,calibrar_precios,MODELOS,validar,libro_ruta
 from excel import crear_excel,DEFINICIONES
 from formato import tabla_formateada, estadisticas_formateadas, valor_formateado
+
+
+def grafica_bandas(datos,fechas,variables,titulo):
+    """Bandas animadas que se revelan por fecha; todas usan el mismo calendario."""
+    nombres={'spot':'Spot USD/MXN','caja':'Caja externa','margen':'Margen de garantía',
+             'patrimonio':'Patrimonio (caja + margen)'}
+    fig=make_subplots(rows=len(variables),cols=1,shared_xaxes=True,
+                      subplot_titles=[nombres[v] for v in variables],
+                      vertical_spacing=.11 if len(variables)>1 else .03)
+    series=[]
+    for fila,variable in enumerate(variables,1):
+        bajo=datos[f'p05_{variable}'].to_numpy()
+        alto=datos[f'p95_{variable}'].to_numpy()
+        medio=datos[f'mediana_{variable}'].to_numpy()
+        for nombre,valores,estilo in (
+            ('p05',bajo,{'line':{'color':'rgba(30,113,172,0)','width':0},'showlegend':False}),
+            ('Banda 5%–95%',alto,{'line':{'color':'rgba(30,113,172,.25)','width':1},
+                                  'fill':'tonexty','fillcolor':'rgba(30,113,172,.22)',
+                                  'showlegend':fila==1}),
+            ('Mediana',medio,{'line':{'color':'#155b91','width':2.5},'showlegend':fila==1}),
+        ):
+            fig.add_trace(go.Scatter(x=fechas,y=valores,name=nombre,mode='lines',**estilo),
+                          row=fila,col=1)
+            series.append(valores)
+        minimo=float(np.min(bajo));maximo=float(np.max(alto))
+        margen=max((maximo-minimo)*.08,.01)
+        fig.update_yaxes(range=[minimo-margen,maximo+margen],
+                         title_text='MXN/USD' if variable=='spot' else 'MXN',
+                         tickprefix='$',tickformat=',.2f' if variable!='spot' else ',.4f',
+                         row=fila,col=1)
+    ultimo=len(fechas)-1
+    pasos=list(range(0,ultimo+1,max(1,int(np.ceil(ultimo/18)))))
+    if pasos[-1]!=ultimo: pasos.append(ultimo)
+    fig.frames=[go.Frame(name=str(dia),traces=list(range(len(series))),
+                         data=[go.Scatter(x=fechas[:dia+1],y=s[:dia+1]) for s in series])
+                for dia in pasos]
+    fig.update_xaxes(range=[fechas[0],fechas[-1]])
+    fig.update_layout(title=titulo,template='plotly_white',
+                      height=440 if len(variables)==1 else 780,
+                      legend={'orientation':'h','y':1.08},
+                      updatemenus=[{'type':'buttons','showactive':False,'x':0,'y':-0.11,
+                                    'buttons':[{'label':'▶ Reproducir','method':'animate',
+                                                'args':[None,{'fromcurrent':False,
+                                                              'frame':{'duration':300,'redraw':False},
+                                                              'transition':{'duration':0}}]},
+                                               {'label':'⏸ Pausar','method':'animate',
+                                                'args':[[None],{'mode':'immediate',
+                                                                 'frame':{'duration':0,'redraw':False}}]}]}],
+                      sliders=[{'active':len(pasos)-1,'x':.24,'len':.75,'y':-.10,
+                                'currentvalue':{'prefix':'Fecha: '},
+                                'steps':[{'label':fechas[dia].strftime('%d/%m'),
+                                          'method':'animate',
+                                          'args':[[str(dia)],{'mode':'immediate',
+                                                               'frame':{'duration':0,'redraw':False},
+                                                               'transition':{'duration':0}}]}
+                                         for dia in pasos]}],
+                      margin={'b':95})
+    return fig
 
 st.set_page_config(page_title='Futuros USD/MXN',page_icon='📈',layout='wide')
 st.title('Futuros USD/MXN | Simulador de liquidez y riesgo')
@@ -84,14 +143,14 @@ if ejecutar:
             progreso[m]=hecho/total
             progress.progress(min(1.,sum(progreso.values())/len(modelos)),text=f'{m}: {hecho:,}/{total:,}')
         with st.spinner('Calculando llamadas, capital y riesgo por trayectoria...'):
-            comp,detalle,ejemplos,bandas,estadisticas,cierres,distribuciones=simular(c,modelos,int(rutas),int(lote),int(semilla),modo,contratos,progreso=avance,con_estadisticas=True,con_distribuciones=True)
+            comp,detalle,ejemplos,bandas,estadisticas,cierres,distribuciones=simular(c,modelos,int(rutas),int(lote),int(semilla),modo,contratos,progreso=avance,con_estadisticas=True,con_distribuciones=True,con_bandas=True)
             xlsx=crear_excel(c,comp,detalle,ejemplos,bandas,estadisticas,cierres,modo=modo)
         progress.empty()
         st.session_state['resultado']=(comp,detalle,ejemplos,bandas,estadisticas,cierres,distribuciones,xlsx,deepcopy(c),fingerprint,modo)
     except Exception as ex: st.error(f'Simulación detenida: {ex}')
-if 'resultado' in st.session_state and len(st.session_state['resultado']) != 11:
+if 'resultado' in st.session_state and (len(st.session_state['resultado']) != 11 or 'p05_spot' not in st.session_state['resultado'][3]):
     del st.session_state['resultado']
-    st.info('Se agregaron gráficas con todas las rutas. Ejecute nuevamente la simulación para generarlas.')
+    st.info('Se agregaron bandas calculadas con todas las rutas. Ejecute nuevamente la simulación para generarlas.')
 if 'resultado' in st.session_state:
     comp,detalle,ejemplos,bandas,estadisticas,cierres,distribuciones,xlsx,cr,old,modo_resultado=st.session_state['resultado']
     if old!=fingerprint: st.warning('Los parámetros cambiaron. Los resultados corresponden a la última ejecución; vuelva a ejecutar para actualizarlos.')
@@ -103,15 +162,28 @@ if 'resultado' in st.session_state:
     tabs=st.tabs(['Trayectorias','Liquidez y riesgo','Estadísticos por variable','Diccionario','Supuestos'])
     with tabs[0]:
         fechas,_=calendario(cr)
-        visibles=st.slider('Trayectorias visibles por modelo',min_value=1,max_value=5,value=1)
-        fig=go.Figure()
-        for modelo,paths in ejemplos.items():
-            for i,path in enumerate(paths[:visibles]):
-                fig.add_trace(go.Scatter(x=fechas,y=path,name=f'{modelo} {i+1}',mode='lines',line={'width':1.8},opacity=.85))
-        fig.update_layout(title='Muestra de trayectorias de spot',xaxis_title='Fecha',yaxis_title='MXN/USD',yaxis_tickprefix='$',yaxis_tickformat=',.4f',template='plotly_white')
-        st.plotly_chart(fig,use_container_width=True)
-        st.caption('Cada línea es un posible camino del dólar. El control solo cambia cuántos ejemplos ves; los estadísticos siguen usando todas las simulaciones.')
+        modelo_spot=st.selectbox('Modelo del spot',list(ejemplos),key='modelo_spot')
+        bandas_spot=bandas[bandas.modelo==modelo_spot].sort_values('dia')
+        st.plotly_chart(grafica_bandas(bandas_spot,fechas,['spot'],
+                                      f'Spot USD/MXN | {modelo_spot}'),use_container_width=True)
+        st.caption('La franja azul contiene entre el percentil 5 y el 95 de todas las rutas simuladas en cada fecha; la línea es la mediana. Use Reproducir o mueva la fecha.')
+        with st.expander('Ver trayectorias individuales de ejemplo'):
+            visibles=st.slider('Trayectorias visibles',min_value=1,max_value=5,value=3)
+            fig=go.Figure()
+            for i,path in enumerate(ejemplos[modelo_spot][:visibles]):
+                fig.add_trace(go.Scatter(x=fechas,y=path,name=f'Ruta {i+1}',mode='lines',line={'width':1.5},opacity=.75))
+            fig.update_layout(xaxis_title='Fecha',yaxis_title='MXN/USD',
+                              yaxis_tickprefix='$',yaxis_tickformat=',.4f',template='plotly_white')
+            st.plotly_chart(fig,use_container_width=True)
     with tabs[1]:
+        fechas,_=calendario(cr)
+        modelo_bandas=st.selectbox('Modelo de caja y margen',list(ejemplos),key='modelo_bandas')
+        datos_bandas=bandas[bandas.modelo==modelo_bandas].sort_values('dia')
+        st.plotly_chart(grafica_bandas(datos_bandas,fechas,
+                                      ['caja','margen','patrimonio'],
+                                      f'Liquidez y patrimonio | {modelo_bandas}'),
+                        use_container_width=True)
+        st.caption('Bandas 5%–95% y mediana de todas las rutas. Tras un cierre anticipado, el margen es cero y la caja y el patrimonio quedan en su valor final; los días sin sesión conservan el último saldo.')
         fig2=go.Figure()
         for _,row in comp.iterrows(): fig2.add_trace(go.Bar(name=row.modelo,x=['Capital suficiente','Cierre forzoso','Pérdida neta'],y=[row.prob_capital_suficiente,row.prob_cierre_forzoso,row.prob_perdida_neta]))
         fig2.update_layout(barmode='group',yaxis_tickformat='.0%',template='plotly_white',title='Probabilidades empíricas')
@@ -182,5 +254,6 @@ if 'resultado' in st.session_state:
         st.markdown('**Cuentas:** P&G diario = dirección × contratos × USD por contrato × cambio del futuro entre sesiones. Se repone el margen si cae bajo mantenimiento; sin caja suficiente, se cierra la posición.')
         st.markdown('**Colas:** ARMA-GARCH-t exponenciado puede producir colas extremas y una media teórica del precio no finita. Por eso se priorizan medianas y cuantiles. El ES es muestral y puede ser inestable.')
 else: st.info('Configure el escenario y pulse **Ejecutar Monte Carlo**.')
+
 
 
