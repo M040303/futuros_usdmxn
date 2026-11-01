@@ -1,4 +1,4 @@
-"""Tres modelos de USD/MXN y motor contable para un escenario académico.
+"""Modelos de USD/MXN y motor contable para un escenario académico.
 
 Ejecutar: python modelos.py --rutas 32
 No realiza optimización ni estima probabilidades de riesgo con la muestra de prueba.
@@ -26,6 +26,42 @@ def calendario(c):
     return fechas, sesiones
 
 
+def calibrar_binomial(precios):
+    """Estima p y dos saltos logarítmicos a partir de precios ordenados.
+
+    Un ensayo Bernoulli representa la dirección de un cambio no nulo.
+    La magnitud de cada dirección es su media condicional histórica.
+    """
+    y=np.asarray(precios,dtype=float)
+    if len(y)<30 or not np.isfinite(y).all() or (y<=0).any():
+        raise ValueError('Binomial requiere al menos 30 precios históricos positivos y válidos')
+    r=np.diff(np.log(y))
+    arriba=r[r>0]; abajo=r[r<0]
+    if len(arriba)==0 or len(abajo)==0:
+        raise ValueError('Binomial requiere tanto subidas como bajadas históricas')
+    return {'prob_subida':float(len(arriba)/(len(arriba)+len(abajo))),
+            'log_subida':float(arriba.mean()),'log_bajada':float(abajo.mean()),
+            'observaciones':int(len(r)),'subidas':int(len(arriba)),
+            'bajadas':int(len(abajo)),'sin_cambio':int(np.sum(r==0)),
+            'fuente':'Rendimientos logarítmicos de la serie histórica cargada'}
+
+
+def estadisticos_binomial(c):
+    """Momentos exactos del generador binomial bajo sesiones independientes."""
+    p=c['binomial']['prob_subida'];u=c['binomial']['log_subida'];d=c['binomial']['log_bajada']
+    _,sesiones=calendario(c);n=int(sesiones[1:].sum())
+    media=p*u+(1-p)*d
+    var=p*(1-p)*(u-d)**2
+    factor=p*np.exp(u)+(1-p)*np.exp(d)
+    factor_cuadrado=p*np.exp(2*u)+(1-p)*np.exp(2*d)
+    media_spot=c['s0']*factor**n
+    var_spot=max(0.,c['s0']**2*(factor_cuadrado**n-factor**(2*n)))
+    return {'sesiones':n,'subidas_esperadas':n*p,'varianza_subidas':n*p*(1-p),
+            'media_log_diaria':media,'varianza_log_diaria':var,
+            'desviacion_log_diaria':np.sqrt(var),
+            'spot_final_esperado':media_spot,'desviacion_spot_final':np.sqrt(var_spot)}
+
+
 def generar(c, nombre, rutas=32, semilla=None):
     """Devuelve precios en MXN/USD, con día cero común. Sin recortes de precios."""
     if rutas < 1:
@@ -40,6 +76,20 @@ def generar(c, nombre, rutas=32, semilla=None):
         u = np.maximum(u, np.nextafter(0., 1.))
         p = c['logistica']
         out[:, 1:] = p['location'] + p['scale'] * (np.log(u) - np.log1p(-u))
+    elif nombre == 'binomial':
+        p=c['binomial']; prob=p['prob_subida']
+        up=p['log_subida']; down=p['log_bajada']
+        if not 0<prob<1 or not np.isfinite([up,down]).all() or up<=0 or down>=0:
+            raise ValueError('Binomial exige 0 < p < 1, salto de subida positivo y bajada negativa')
+        # Cada sesión es un ensayo independiente. En días sin sesión se
+        # mantiene el último spot, en vez de inventar una observación nueva.
+        _,sesiones=calendario(c)
+        for j in range(1,H+1):
+            if sesiones[j]:
+                salto=np.where(rng.random(rutas)<prob,up,down)
+                out[:,j]=out[:,j-1]*np.exp(salto)
+            else:
+                out[:,j]=out[:,j-1]
     elif nombre == 'gbm':
         p = c['gbm']
         r = p['media_log_diaria'] + p['sigma_diaria'] * rng.standard_normal((rutas, H))
@@ -149,7 +199,7 @@ def ejecutar(rutas=32):
     fechas, sesiones = calendario(c)
     # Pequeña muestra de verificación, no Monte Carlo para inferencia.
     resumen = {}; rows = []
-    for i, nombre in enumerate(('logistica', 'gbm', 'garch')):
+    for i, nombre in enumerate(('logistica', 'gbm', 'garch', 'binomial')):
         paths = generar(c, nombre, rutas, c['semilla']+i)
         invalid = ~np.isfinite(paths) | (paths <= 0)
         if invalid.any():
@@ -175,8 +225,8 @@ def ejecutar(rutas=32):
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
-    fig, axes = plt.subplots(3,1,figsize=(10,9),sharex=True)
-    for ax,nombre in zip(axes,('logistica','gbm','garch')):
+    fig, axes = plt.subplots(4,1,figsize=(10,11),sharex=True)
+    for ax,nombre in zip(axes,('logistica','gbm','garch','binomial')):
         ar = [r for r in rows if r['modelo']==nombre]
         ax.fill_between(fechas, [r['p05_muestra'] for r in ar], [r['p95_muestra'] for r in ar],alpha=.2)
         ax.plot(fechas, [r['mediana_muestra'] for r in ar],label='Mediana de muestra de prueba')
@@ -190,3 +240,4 @@ def ejecutar(rutas=32):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser();parser.add_argument('--rutas',type=int,default=32)
     ejecutar(parser.parse_args().rutas)
+

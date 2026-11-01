@@ -8,7 +8,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import streamlit as st
-from modelos import cargar,calendario
+from modelos import cargar,calendario,estadisticos_binomial
 from motor import simular,calibrar_precios,MODELOS,validar,libro_ruta
 from excel import crear_excel,DEFINICIONES
 from formato import tabla_formateada, estadisticas_formateadas, valor_formateado
@@ -77,7 +77,7 @@ st.caption('Escenario académico prospectivo. Precio del futuro aproximado por e
 base=cargar(); c=deepcopy(base); p=c['operacion']
 with st.sidebar:
     st.header('Escenario')
-    modelos=st.multiselect('Modelos de precio',list(MODELOS),default=list(MODELOS),format_func=lambda x:{'logistica':'Logística inversa','gbm':'Movimiento browniano geométrico','garch':'ARMA-GARCH-t'}[x])
+    modelos=st.multiselect('Modelos de precio',list(MODELOS),default=list(MODELOS),format_func=lambda x:{'logistica':'Logística inversa','gbm':'Movimiento browniano geométrico','garch':'ARMA-GARCH-t','binomial':'Binomial diario'}[x])
     capital=st.number_input('Capital disponible ($ MXN)',min_value=1.0,value=float(p['capital']),step=10000.0)
     contratos=st.number_input('Contratos',min_value=1,value=int(p['contratos_base']),step=1)
     direccion=st.selectbox('Posición',['Larga: compra USD','Corta: venta USD'])
@@ -103,12 +103,16 @@ with st.sidebar:
     lote=st.number_input('Rutas por lote',min_value=100,max_value=50000,value=5000,step=1000)
     semilla=st.number_input('Semilla',min_value=0,value=int(c['semilla']))
     st.divider()
-    archivo=st.file_uploader('Precios históricos para recalibrar logística y MBG',type=['csv','xlsx'])
+    archivo=st.file_uploader('Precios históricos para recalibrar logística, MBG y binomial',type=['csv','xlsx'])
     with st.expander('Parámetros avanzados'):
         loc=st.number_input('Logística: ubicación ($ MXN/USD)',value=float(c['logistica']['location']),format='%.7f')
         scale=st.number_input('Logística: escala ($ MXN/USD)',min_value=1e-8,value=float(c['logistica']['scale']),format='%.7f')
         mu=st.number_input('MBG: media log diaria (%)',value=100*float(c['gbm']['media_log_diaria']),format='%.6f')/100
         sigma=st.number_input('MBG: sigma diaria (%)',min_value=1e-8,value=100*float(c['gbm']['sigma_diaria']),format='%.6f')/100
+        p_up=st.number_input('Binomial: probabilidad de subida (%)',min_value=.01,max_value=99.99,value=100*float(c['binomial']['prob_subida']),format='%.4f')/100
+        salto_up=st.number_input('Binomial: salto logarítmico al subir (%)',min_value=.000001,value=100*float(c['binomial']['log_subida']),format='%.6f')/100
+        salto_down=st.number_input('Binomial: magnitud de caída logarítmica (%)',min_value=.000001,value=-100*float(c['binomial']['log_bajada']),format='%.6f')/100
+        st.caption('Binomial: cada sesión sube o baja con las probabilidades indicadas; los saltos se estiman de rendimientos logarítmicos históricos. Los tres valores se pueden editar si no carga un archivo.')
         st.caption('ARMA-GARCH-t conserva juntos coeficientes y estado del ajuste histórico en configuracion.json. Para otros datos, reestime ambos antes de seleccionarlo.')
     ejecutar=st.button('Ejecutar Monte Carlo',type='primary',use_container_width=True)
 
@@ -121,8 +125,8 @@ if archivo is not None:
         elegido=st.selectbox('Columna de precios históricos',numcols)
         if elegido:
             ajustada=calibrar_precios(tabla[elegido].dropna().values,c)
-            c['logistica']=ajustada['logistica'];c['gbm']=ajustada['gbm']
-            st.info('Logística y MBG recalibrados. El spot inicial y GARCH quedan bajo control explícito.')
+            c['logistica']=ajustada['logistica'];c['gbm']=ajustada['gbm'];c['binomial']=ajustada['binomial']
+            st.info('Logística, MBG y binomial recalibrados. El spot inicial y GARCH quedan bajo control explícito.')
             if 'garch' in modelos:
                 st.error('GARCH usa otro estado histórico. Retírelo de la selección o reestime el modelo y su estado fuera de la app.')
                 ejecutar=False
@@ -130,6 +134,7 @@ if archivo is not None:
 else:
     c['logistica'].update(location=loc,scale=scale)
     c['gbm'].update(media_log_diaria=mu,sigma_diaria=sigma)
+    c['binomial'].update(prob_subida=p_up,log_subida=salto_up,log_bajada=-salto_down)
 if (s0!=base['s0'] or inicio.isoformat()!=base['inicio']) and 'garch' in modelos:
     st.warning('Cambiar S0 o fecha mantiene el estado ARMA-GARCH histórico: escenario hipotético no recalibrado.')
 if not modelos: st.warning('Seleccione al menos un modelo.');ejecutar=False
@@ -156,9 +161,24 @@ if 'resultado' in st.session_state:
     if old!=fingerprint: st.warning('Los parámetros cambiaron. Los resultados corresponden a la última ejecución; vuelva a ejecutar para actualizarlos.')
     st.download_button('Descargar Excel',xlsx,file_name='futuros_usdmxn_montecarlo.xlsx',mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     st.subheader('Comparativa de modelos')
-    cols=['modelo','simulaciones','prob_capital_suficiente','prob_cierre_forzoso','mediana_neta','p95_capital_requerido','VaR95_neto','VaR99_neto']
+    cols=['modelo','simulaciones','prob_capital_suficiente','prob_cierre_forzoso','prob_al_menos_una_llamada','mediana_neta','p95_capital_requerido','p95_depositos_llamadas','VaR95_neto','VaR99_neto']
     st.dataframe(tabla_formateada(comp[cols]),use_container_width=True)
-    st.caption('Capital suficiente = margen inicial + costo de entrada + llamadas hipotéticas hasta el cierre ≤ capital. VaR positivo indica pérdida; puede ser negativo si el cuantil aún representa ganancia.')
+    st.caption('Capital suficiente = margen inicial + costo de entrada + llamadas hipotéticas hasta el cierre ≤ capital. La probabilidad de llamada y los depósitos p95 usan la cuenta hipotética hasta el horizonte. VaR positivo indica pérdida; puede ser negativo si el cuantil aún representa ganancia.')
+    if 'binomial' in comp.modelo.values:
+        bp=cr['binomial']; eb=estadisticos_binomial(cr)
+        st.markdown('**Modelo binomial: parámetros y estadísticos teóricos**')
+        st.dataframe(pd.DataFrame([{
+            'Prob. subida':f"{bp['prob_subida']:.2%}",
+            'Salto al subir':f"{bp['log_subida']:.4%}",
+            'Salto al bajar':f"{bp['log_bajada']:.4%}",
+            'Sesiones':eb['sesiones'],
+            'Subidas esperadas':f"{eb['subidas_esperadas']:.1f}",
+            'Varianza de subidas':f"{eb['varianza_subidas']:.2f}",
+            'Media log diaria':f"{eb['media_log_diaria']:.4%}",
+            'Varianza log diaria':f"{eb['varianza_log_diaria']:.8f}",
+            'Spot final esperado':f"${eb['spot_final_esperado']:,.4f}"
+        }]),hide_index=True,use_container_width=True)
+        st.caption(f"Calibración: {bp['observaciones']} cambios históricos, {bp['subidas']} subidas, {bp['bajadas']} bajadas y {bp['sin_cambio']} sin cambio. La frecuencia y magnitud de subidas/bajadas se estiman por separado; los parámetros editados son supuestos del escenario.")
     tabs=st.tabs(['Trayectorias','Liquidez y riesgo','Estadísticos por variable','Diccionario','Supuestos'])
     with tabs[0]:
         fechas,_=calendario(cr)
@@ -249,7 +269,8 @@ if 'resultado' in st.session_state:
         st.dataframe(dic,hide_index=True,use_container_width=True)
         st.caption('Los días se cuentan desde la apertura: día 0 es la fecha inicial. −1 en el día de llamada significa que no hubo llamada.')
     with tabs[4]:
-        st.markdown('**Tres modelos:** logística inversa sobre niveles históricos iid; MBG sobre log rendimientos; ARMA(2,2)-GARCH(1,1) con innovaciones t estandarizadas. Fisher quedó fuera del diseño acordado.')
+        st.markdown('**Cuatro modelos:** logística inversa sobre niveles históricos iid; MBG sobre log rendimientos; ARMA(2,2)-GARCH(1,1) con innovaciones t estandarizadas; binomial de subidas y bajadas independientes en sesiones. Fisher quedó fuera del diseño acordado.')
+        st.markdown('**Binomial:** el número de subidas en el horizonte sigue una binomial bajo el supuesto de ensayos independientes con probabilidad constante. Cada subida o bajada aplica el salto logarítmico medio histórico de su dirección. El orden de los saltos cambia las llamadas de margen. No equivale a ajustar una binomial directamente a precios continuos.')
         st.markdown('**Futuros:** contrato DA de USD 10,000; F=S redondeado al tick como aproximación. Posición cerrada antes del vencimiento. Sin intereses, impuestos, cambios de margen, profundidad ni base de futuros observada.')
         st.markdown('**Cuentas:** P&G diario = dirección × contratos × USD por contrato × cambio del futuro entre sesiones. Se repone el margen si cae bajo mantenimiento; sin caja suficiente, se cierra la posición.')
         st.markdown('**Colas:** ARMA-GARCH-t exponenciado puede producir colas extremas y una media teórica del precio no finita. Por eso se priorizan medianas y cuantiles. El ES es muestral y puede ser inestable.')

@@ -1,14 +1,14 @@
 """Pruebas de conciliacion significativas entre motor por lotes y libro diario."""
 from copy import deepcopy
 import numpy as np
-from modelos import cargar,generar
+from modelos import cargar,generar,calendario,calibrar_binomial,estadisticos_binomial,ROOT
 from motor import procesar_lote,libro_ruta,simular
 from excel import DEFINICIONES,crear_excel
 
 def probar():
     c=cargar()
     for modo in ('fijo','porcentaje'):
-        for nombre in ('logistica','gbm','garch'):
+        for nombre in ('logistica','gbm','garch','binomial'):
             paths=generar(c,nombre,20,9831)
             d=procesar_lote(paths,c,3,modo)
             for i in range(20):
@@ -60,7 +60,28 @@ def probar():
     dia=int(cierre.iloc[0].dia_cierre)
     assert np.all(serie_cierre[1,dia:,0]==0)
     assert np.all(serie_cierre[0,dia:,0]==serie_cierre[0,dia,0])
-    print('Aprobadas: conciliaciones, cierre, reproducibilidad, estadísticas, barras y bandas de todas las rutas.')
+    historico=np.genfromtxt(ROOT/'data'/'precios.csv',delimiter=',',skip_header=1,usecols=1)
+    p_bin=calibrar_binomial(historico)
+    for clave in ('prob_subida','log_subida','log_bajada','subidas','bajadas','sin_cambio'):
+        assert np.isclose(p_bin[clave],c['binomial'][clave])
+    precios_bin=generar(c,'binomial',5000,731)
+    _,sesiones=calendario(c)
+    rendimientos=np.diff(np.log(precios_bin),axis=1)
+    assert np.all(rendimientos[:,~sesiones[1:]]==0)
+    observados=rendimientos[:,sesiones[1:]]
+    assert np.all(np.isclose(observados,c['binomial']['log_subida']) |
+                  np.isclose(observados,c['binomial']['log_bajada']))
+    assert abs(np.mean(observados>0)-c['binomial']['prob_subida'])<.02
+    eb=estadisticos_binomial(c)
+    assert eb['sesiones']==int(sesiones[1:].sum())
+    assert np.isclose(eb['varianza_subidas'],eb['sesiones']*c['binomial']['prob_subida']*(1-c['binomial']['prob_subida']))
+    assert abs(precios_bin[:,-1].mean()-eb['spot_final_esperado'])<5*eb['desviacion_spot_final']/np.sqrt(len(precios_bin))
+    cuatro=simular(c,['binomial'],100,100,42,con_estadisticas=True,
+                   con_distribuciones=True,con_bandas=True)
+    assert cuatro[0].iloc[0].simulaciones==100
+    assert cuatro[3].modelo.nunique()==1
+    assert (cuatro[6].groupby(['modelo','variable']).rutas.sum()==100).all()
+    print('Aprobadas: 160 conciliaciones, cuatro modelos, calibración binomial, llamadas, estadísticas, barras y bandas.')
 if __name__=='__main__': probar()
 
 

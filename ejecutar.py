@@ -20,6 +20,7 @@ def main():
     print();dest=Path(args.salida);dest.parent.mkdir(parents=True,exist_ok=True)
     dest.write_bytes(crear_excel(c,comp,detalle,ejemplos,bandas,estadisticas,cierres,modo=args.modo))
     columnas=['modelo','simulaciones','prob_capital_suficiente','prob_cierre_forzoso',
-              'mediana_neta','p95_capital_requerido','VaR95_neto','VaR99_neto']
+              'prob_al_menos_una_llamada','mediana_neta','p95_capital_requerido',
+              'p95_depositos_llamadas','VaR95_neto','VaR99_neto']
     print(comp[columnas].to_string(index=False));print(f'Excel: {dest.resolve()}')
 if __name__=='__main__': main()

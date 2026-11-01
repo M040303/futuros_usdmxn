@@ -10,6 +10,7 @@ DINERO = {
     'llamada', 'liquidez', 'margen', 'patrimonio',
     'mediana_neta', 'p05_neta', 'p95_neta', 'mediana_efectivo_retirar',
     'p95_capital_requerido', 'p99_capital_requerido', 'p95_llamada_maxima',
+    'p95_depositos_llamadas',
 }
 PRECIOS = {'spot', 'futuro_proxy', 'precio_dolar_final',
            'dolar_llamada_maxima', 'mediana_dolar_final', 'Spot_MXN_USD',

@@ -5,7 +5,7 @@ from openpyxl.styles import Font,PatternFill,Alignment
 from openpyxl.chart import LineChart,Reference
 from openpyxl.utils import get_column_letter
 import pandas as pd
-from modelos import calendario
+from modelos import calendario,estadisticos_binomial
 from motor import libro_ruta,estadisticas_por_variable
 from formato import formato_excel
 
@@ -58,7 +58,7 @@ def crear_excel(c,comparacion,detalle,ejemplos,bandas,estadisticas=None,cierres=
     ws.append(['Apertura',c['inicio'],'Dias naturales',c['dias']])
     ws.append(['VaR y ES muestrales; cierre forzoso incluido en el P&G neto. Capital requerido: libro sin cierre forzoso.'])
     ws.append([])
-    principales=['modelo','simulaciones','capital','prob_capital_suficiente','prob_cierre_forzoso','prob_perdida_neta','mediana_neta','p05_neta','p95_neta','p95_capital_requerido','p99_capital_requerido','VaR95_neto','VaR99_neto','ES95_neto_muestral','ES99_neto_muestral']
+    principales=['modelo','simulaciones','capital','prob_capital_suficiente','prob_cierre_forzoso','prob_al_menos_una_llamada','prob_perdida_neta','mediana_neta','p05_neta','p95_neta','p95_capital_requerido','p99_capital_requerido','p95_depositos_llamadas','p95_llamada_maxima','VaR95_neto','VaR99_neto','ES95_neto_muestral','ES99_neto_muestral']
     ws.append(principales)
     for row in comparacion[principales].itertuples(index=False,name=None): ws.append([None if str(v)=='nan' else v for v in row])
     st=wb.create_sheet('Estadisticas_variable')
@@ -85,6 +85,32 @@ def crear_excel(c,comparacion,detalle,ejemplos,bandas,estadisticas=None,cierres=
             if isinstance(v,dict): yield from flat(v,key)
             else: yield key,str(v) if isinstance(v,(list,tuple)) else v
     for row in flat(c): md.append(list(row))
+    if 'binomial' in comparacion.modelo.values:
+        bp=c['binomial']; eb=estadisticos_binomial(c)
+        bstats=wb.create_sheet('Binomial')
+        bstats.append(['Estadístico','Valor','Interpretación'])
+        for fila in [
+            ('Probabilidad de subida',bp['prob_subida'],'Frecuencia de subidas entre cambios históricos no nulos.'),
+            ('Salto logarítmico al subir',bp['log_subida'],'Media de los log rendimientos positivos.'),
+            ('Salto logarítmico al bajar',bp['log_bajada'],'Media de los log rendimientos negativos.'),
+            ('Sesiones simuladas',eb['sesiones'],'Ensayos Bernoulli por ruta.'),
+            ('Subidas esperadas',eb['subidas_esperadas'],'Esperanza del conteo binomial.'),
+            ('Varianza de subidas',eb['varianza_subidas'],'Varianza del conteo binomial.'),
+            ('Media log diaria',eb['media_log_diaria'],'Media del log rendimiento por sesión.'),
+            ('Varianza log diaria',eb['varianza_log_diaria'],'Varianza del log rendimiento por sesión.'),
+            ('Desviación log diaria',eb['desviacion_log_diaria'],'Desviación del log rendimiento por sesión.'),
+            ('Spot final esperado',eb['spot_final_esperado'],'Esperanza del spot final bajo el modelo binomial.'),
+            ('Desviación del spot final',eb['desviacion_spot_final'],'Desviación teórica del spot final.'),
+            ('Cambios históricos',bp['observaciones'],'Muestra empleada para la calibración inicial.'),
+            ('Subidas históricas',bp['subidas'],'Movimientos positivos en la muestra.'),
+            ('Bajadas históricas',bp['bajadas'],'Movimientos negativos en la muestra.'),
+            ('Días sin cambio',bp['sin_cambio'],'Excluidos de la probabilidad de subida.'),
+        ]: bstats.append(fila)
+        for row in bstats.iter_rows(min_row=2):
+            if row[0].value in ('Probabilidad de subida','Salto logarítmico al subir','Salto logarítmico al bajar','Media log diaria','Desviación log diaria'):
+                row[1].number_format='0.0000%'
+            elif row[0].value in ('Spot final esperado','Desviación del spot final'):
+                row[1].number_format='"$"#,##0.0000'
     notes=wb.create_sheet('Notas')
     for line in [
         'Contrato DA: USD 10,000 por contrato. Verificar ficha y tarifa vigente antes de operar.',
@@ -93,6 +119,7 @@ def crear_excel(c,comparacion,detalle,ejemplos,bandas,estadisticas=None,cierres=
         'Modelo logistico: niveles iid; se ajusta a precios historicos, no a rendimientos.',
         'MBG: S_t=S_(t-1)*exp(media_log + sigma*Z_t).',
         'GARCH: ARMA(2,2) para media; h_t=omega+alpha*e_(t-1)^2+beta*h_(t-1); innovacion t estandarizada.',
+        'Binomial: ensayos independientes por sesion; p de subida y saltos logaritmicos medios por direccion estimados de cambios historicos no nulos.',
         'En GARCH-t, la esperanza teorica del precio exponenciado puede ser infinita: comparar medianas y cuantiles.',
         'Margen = margen previo + P&G diario. Si baja del mantenimiento, reponer hasta objetivo.',
         'Si no hay caja para la llamada: cierre forzoso al precio de la sesion y pago de costos de salida.',

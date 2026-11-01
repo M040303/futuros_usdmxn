@@ -20,7 +20,7 @@ python verificar.py
 python probar_motor.py
 ```
 
-La app inicia con 100,000 rutas por modelo. Para un millón: `python ejecutar.py --rutas 1000000 --lote 5000 --salida resultados/millon.xlsx`. El cálculo se divide en lotes. Las estadísticas por variable usan **todas** las rutas; la tabla grande de resultados individuales se sustituyó por un resumen y una ruta de ejemplo por modelo. La app conserva hasta 20,000 rutas por modelo para el histograma y para inspeccionar un caso. Requiere memoria suficiente para reunir temporalmente los resultados de un modelo.
+La app inicia con 100,000 rutas por modelo. Para un millón: `python ejecutar.py --rutas 1000000 --lote 5000 --salida resultados/millon.xlsx`. El cálculo se divide en lotes. Las estadísticas y los histogramas por variable usan **todas** las rutas; las bandas animadas del spot, caja, margen y patrimonio también se calculan con todas las rutas. La app conserva hasta 20,000 rutas por modelo para inspeccionar un caso. Requiere memoria suficiente para reunir temporalmente los resultados de un modelo; las bandas usan un archivo temporal por modelo.
 
 Para publicar en Streamlit Community Cloud, subir el contenido de este directorio a un repositorio de GitHub y seleccionar `app.py` como archivo principal. Los datos incluidos son históricos y los parámetros corresponden al escenario de estudio; publicar la app no actualiza las tasas, precios ni contratos automáticamente.
 
@@ -44,11 +44,12 @@ El monto de MXN 50 es **un supuesto de costo integral del escenario**, no una ta
 
 El valor simulado del futuro es `F_t = round(S_t/tick) × tick`. No incorpora base observada, diferencial de tasas, carry ni precio real de la serie. El contrato se cierra antes del vencimiento del escenario para evitar modelar entrega física.
 
-## Tres generadores del precio
+## Cuatro generadores del precio
 
 1. **Logística inversa sobre niveles:** `S_t = loc + scale × log(U_t/(1-U_t))`, con `U_t ~ Uniforme(0,1)` independiente por día. La ubicación y la escala provienen del ajuste histórico incluido. El nivel simulado puede saltar de un día a otro; esto eleva llamadas y cierres. No se recentra al spot actual. Si produce un precio no positivo, la corrida se detiene y lo reporta.
 2. **Movimiento browniano geométrico:** `S_t = S_(t−1) × exp(media_log_diaria + sigma_diaria × Z_t)`, con `Z_t ~ N(0,1)`. La media y desviación se estiman sobre log rendimientos históricos; la volatilidad es constante.
 3. **ARMA(2,2)–GARCH(1,1) con t estandarizada:** `r_t = ar1 r_(t−1) + ar2 r_(t−2) + ma1 ε_(t−1) + ma2 ε_(t−2) + ε_t`; `h_t = omega + alpha ε_(t−1)^2 + beta h_(t−1)`; `ε_t = sqrt(h_t) z_t` y `z_t` tiene t estandarizada a varianza 1. Después `S_t=S_(t−1)exp(r_t)`. Los coeficientes y el estado de arranque vienen del ajuste en R incluido en `data/`. Para usar datos nuevos hay que reestimar **coeficientes y estado juntos**.
+4. **Binomial diario:** en cada sesión se sortea una subida con probabilidad `p` o una bajada con probabilidad `1−p`. Se aplica `S_t=S_(t−1)exp(u)` al subir y `S_t=S_(t−1)exp(d)` al bajar, donde `u>0` y `d<0` son las medias de los log rendimientos históricos positivos y negativos. Los movimientos históricos sin cambio se excluyen de `p`. En `n` sesiones, el número de subidas tiene distribución `Binomial(n,p)` bajo el supuesto de independencia. Se muestran `E[K]=np`, `Var(K)=np(1−p)`, la media y la desviación del log rendimiento diario. Los parámetros son editables y también se pueden recalibrar al cargar una serie ordenada de precios. Los días sin sesión conservan el último spot.
 
 La distribución de Fisher se excluyó por la decisión posterior del proyecto. La serie logística es un requerimiento académico, pero simular niveles independientes no conserva la dinámica cambiaria. El ajuste GARCH tiene persistencia casi unitaria y problemas diagnósticos documentados; sus cuantiles no deben presentarse como probabilidades calibradas del mundo real. Con innovaciones t exponenciadas, algunas esperanzas teóricas del precio pueden no existir. Por ello el tablero prioriza medianas y cuantiles; el ES presentado es solo de muestra.
 
@@ -57,6 +58,8 @@ La distribución de Fisher se excluyó por la decisión posterior del proyecto. 
 Por cada sesión: `P&G_t = dirección × contratos × 10,000 × (F_t − F_última sesión)`. Se suma al margen. Si el margen cae debajo del mantenimiento, se transfiere caja externa hasta el objetivo. Una transferencia de margen **no es pérdida**. Si la caja no alcanza, la posición se cierra, se paga el costo de salida y se retira el saldo del margen (que puede ser negativo por una pérdida grande). No se agregan intereses, retiros mientras está abierta ni impuestos.
 
 El resumen estadístico del Excel incluye mínimo, máximo, promedio muestral, desviación estándar muestral y mediana de las principales variables; los promedios del modelo GARCH no se interpretan como esperanzas teóricas.
+
+La comparación agrega la probabilidad empírica de al menos una llamada de margen, el percentil 95 de los depósitos acumulados y el percentil 95 de la llamada máxima, todos obtenidos de la cuenta hipotética que permanece abierta hasta el horizonte. La llamada se activa cuando el margen baja del umbral y repone hasta el objetivo configurado; la regla es idéntica para los cuatro modelos.
 
 El capital total inyectado realizado es `margen inicial + costo de entrada + llamadas pagadas`. El efectivo retirable final es caja más margen devuelto menos costo de salida. La ganancia neta es `efectivo retirable − capital inicial`. La llamada máxima, su día y spot se reportan para las llamadas **pagadas**; el Excel también muestra la llamada máxima hipotética hasta el horizonte.
 

@@ -13,9 +13,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import numpy as np
 import pandas as pd
-from modelos import calendario, generar
+from modelos import calendario, generar, calibrar_binomial
 
-MODELOS = ('logistica', 'gbm', 'garch')
+MODELOS = ('logistica', 'gbm', 'garch', 'binomial')
 
 
 def validar(c, n, modo):
@@ -141,6 +141,7 @@ def resumen(df,c,modelo):
     row={'modelo':modelo,'simulaciones':len(df),'capital':A,
          'prob_capital_suficiente':float(df['capital_suficiente_horizonte'].mean()),
          'prob_cierre_forzoso':float(df['cierre_forzoso'].mean()),
+         'prob_al_menos_una_llamada':float((df['numero_llamadas_horizonte']>0).mean()),
          'prob_perdida_neta':float((df['ganancia_neta']<0).mean()),
          'mediana_neta':float(df['ganancia_neta'].median()),
          'p05_neta':float(df['ganancia_neta'].quantile(.05)),
@@ -149,6 +150,7 @@ def resumen(df,c,modelo):
          'p95_capital_requerido':float(df['capital_requerido_horizonte'].quantile(.95)),
          'p99_capital_requerido':float(df['capital_requerido_horizonte'].quantile(.99)),
          'p95_llamada_maxima':float(df['llamada_maxima_horizonte'].quantile(.95)),
+         'p95_depositos_llamadas':float(df['depositos_llamadas_horizonte'].quantile(.95)),
          'mediana_dolar_final':float(df['precio_dolar_final'].median())}
     for level in (.95,.99):
         q=float(np.quantile(loss,level)); qh=float(np.quantile(horizon_loss,level))
@@ -245,20 +247,23 @@ def distribuciones_por_variable(valores_por_modelo, max_barras=35):
         validos={modelo:a[np.isfinite(a) & ((a>=0) if variable.startswith('dia_llamada_maxima') else True)]
                  for modelo,a in numericas.items()}
         todos=np.concatenate(list(validos.values()))
+        categorias_numericas=None
         if len(todos)==0:
             etiquetas=[]; limites=None
         elif variable in ('capital_suficiente_horizonte','cierre_forzoso'):
             etiquetas=['No (0)','Sí (1)']; limites=None
         else:
             unicos=np.unique(todos)
-            if len(unicos)<=max_barras and np.all(np.isclose(unicos,np.round(unicos))):
+            if len(unicos)<=max_barras and np.all(np.abs(unicos-np.rint(unicos))<1e-10):
                 etiquetas=[f'{int(v):,}' for v in unicos]; limites=None
+                categorias_numericas=unicos
             else:
                 bajo,alto=np.quantile(todos,[.005,.995])
                 if bajo==alto:
                     bajo,alto=float(np.min(todos)),float(np.max(todos))
                 if bajo==alto:
                     etiquetas=[f'{bajo:,.4g}']; limites=None
+                    categorias_numericas=np.array([bajo])
                 else:
                     limites=np.linspace(bajo,alto,max_barras+1)
                     etiquetas=[f'< {bajo:,.4g}']+[f'{l:,.4g} a {r:,.4g}' for l,r in zip(limites[:-1],limites[1:])]+[f'> {alto:,.4g}']
@@ -270,7 +275,7 @@ def distribuciones_por_variable(valores_por_modelo, max_barras=35):
                 interior=np.histogram(v[(v>=limites[0]) & (v<=limites[-1])],bins=limites)[0]
                 conteos=[int(np.sum(v<limites[0]))]+interior.tolist()+[int(np.sum(v>limites[-1]))]
             elif etiquetas:
-                conteos=[int(np.sum(v==float(e.replace(',','')))) for e in etiquetas]
+                conteos=[int(np.sum(v==valor)) for valor in categorias_numericas]
             else:
                 conteos=[]
             for orden,(etiqueta,n) in enumerate(zip(etiquetas,conteos)):
@@ -373,7 +378,7 @@ def simular(c,modelos=MODELOS,rutas=100000,lote=5000,semilla=None,modo='fijo',co
 
 
 def calibrar_precios(precios,c):
-    """Recalibra logistica de niveles y MBG de diferencias logaritmicas.
+    """Recalibra logística, MBG y binomial con la misma serie histórica.
 
     No toca ARMA-GARCH: sus coeficientes y estado deben reestimarse juntos.
     """
@@ -385,6 +390,7 @@ def calibrar_precios(precios,c):
     rets=np.diff(np.log(y)); sigma=float(np.std(rets,ddof=1)); media=float(np.mean(rets))
     nuevo['logistica'].update(location=float(loc),scale=float(scale))
     nuevo['gbm'].update(media_log_diaria=media,sigma_diaria=sigma,mu_diaria=media+sigma*sigma/2)
+    nuevo['binomial'].update(calibrar_binomial(y))
     nuevo['s0']=float(y[-1])
     return nuevo
 
