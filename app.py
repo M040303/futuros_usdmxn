@@ -71,6 +71,32 @@ def grafica_bandas(datos,fechas,variables,titulo):
                       margin={'b':95})
     return fig
 
+
+def etiqueta_intervalo(grupo,unidad):
+    """Devuelve una marca breve para el eje y el intervalo completo para hover."""
+    def numero(valor,corto=False):
+        v=float(valor.replace(',',''))
+        if unidad=='MXN/USD':
+            return f'${v:,.2f}' if corto else f'${v:,.4f}'
+        if unidad=='MXN':
+            signo='−' if v<0 else ''
+            magnitud=abs(v)
+            if corto and magnitud>=1_000_000: return f'{signo}${magnitud/1_000_000:,.1f} M'
+            if corto and magnitud>=1_000: return f'{signo}${magnitud/1_000:,.0f} mil'
+            if corto and magnitud<10: return f'{signo}${magnitud:,.2f}'
+            return f'{signo}${magnitud:,.0f}' if corto else f'{signo}${magnitud:,.2f}'
+        return f'{v:,.0f}' if unidad in ('conteo','día natural','0/1') else f'{v:,.2f}'
+    try:
+        if ' a ' in grupo:
+            izquierdo,derecho=grupo.split(' a ',1)
+            centro=(float(izquierdo.replace(',',''))+float(derecho.replace(',','')))/2
+            return numero(str(centro),True),f'{numero(izquierdo)} a {numero(derecho)}'
+        if grupo.startswith('< '): return '< '+numero(grupo[2:],True),'< '+numero(grupo[2:])
+        if grupo.startswith('> '): return '> '+numero(grupo[2:],True),'> '+numero(grupo[2:])
+        return numero(grupo,True),numero(grupo)
+    except ValueError:
+        return grupo,grupo
+
 st.set_page_config(page_title='Futuros USD/MXN',page_icon='📈',layout='wide')
 st.title('Futuros USD/MXN | Simulador de liquidez y riesgo')
 st.caption('Escenario académico prospectivo. Precio del futuro aproximado por el spot; revise precios, márgenes y costos vigentes antes de tomar decisiones.')
@@ -220,29 +246,37 @@ if 'resultado' in st.session_state:
         st.dataframe(tabla_formateada(flujo),use_container_width=True)
         st.caption('La distribución del capital requerido se puede comparar entre modelos en la pestaña Estadísticos por variable.')
     with tabs[2]:
-        filtro=st.selectbox('Modelo',list(ejemplos),key='filtroestad')
-        st.markdown('**Distribución de resultados por ruta**')
+        filtro=st.selectbox('Modelo para la tabla de estadísticos',list(ejemplos),key='filtroestad')
+        st.subheader('Distribución de resultados por ruta')
+        st.caption('Cada gráfica incluye todas las rutas de cada modelo. El eje X muestra algunas marcas para facilitar la lectura; pase el cursor sobre una barra para ver su intervalo, frecuencia y porcentaje.')
         variables=list(estadisticas.variable.drop_duplicates())+['motivo_cierre']
-        variable=st.selectbox('Variable para la gráfica',variables,
-                              format_func=lambda v: DEFINICIONES.get(v,(v,'',''))[0],
-                              key='variable_grafica')
-        nombre,unidad,descripcion=DEFINICIONES.get(variable,(variable,'',''))
-        st.caption(descripcion)
-        grafica=distribuciones[distribuciones.variable==variable].sort_values('orden')
-        fig_dist=go.Figure()
-        for modelo in ejemplos:
-            datos=grafica[grafica.modelo==modelo]
-            fig_dist.add_trace(go.Bar(name=modelo,x=datos.grupo,y=datos.rutas,
-                                      customdata=datos.proporcion,
-                                      hovertemplate='%{x}<br>Rutas: %{y:,}<br>Porcentaje: %{customdata:.2%}<extra>%{fullData.name}</extra>'))
-        fig_dist.update_layout(title=f'{nombre} por modelo',barmode='group',
-                               xaxis_title=unidad,yaxis_title='Número de rutas',
-                               xaxis={'categoryorder':'array','categoryarray':grafica.grupo.drop_duplicates().tolist(),
-                                      'tickangle':-50},
-                               template='plotly_white',height=570,legend_title='Modelo',
-                               margin={'b':140})
-        st.plotly_chart(fig_dist,use_container_width=True)
-        st.caption('Cada barra cuenta rutas del modelo. Los intervalos son idénticos entre modelos; las colas agrupan extremos y “Sin llamada” conserva los casos sin evento. Se incluyen todas las simulaciones, aunque la inspección individual se limite a 20,000 rutas.')
+        for variable in variables:
+            nombre,unidad,descripcion=DEFINICIONES.get(variable,(variable,'',''))
+            grafica=distribuciones[distribuciones.variable==variable].sort_values('orden')
+            if grafica.empty: continue
+            st.markdown(f'#### {nombre}')
+            st.caption(descripcion)
+            fig_dist=go.Figure()
+            for modelo in ejemplos:
+                datos=grafica[grafica.modelo==modelo]
+                intervalos=[etiqueta_intervalo(grupo,unidad)[1] for grupo in datos.grupo]
+                fig_dist.add_trace(go.Bar(name=modelo,x=datos.orden,y=datos.rutas,
+                                          customdata=[[intervalo,float(p)] for intervalo,p in zip(intervalos,datos.proporcion)],
+                                          hovertemplate='%{customdata[0]}<br>Rutas: %{y:,}<br>Porcentaje: %{customdata[1]:.2%}<extra>%{fullData.name}</extra>'))
+            marcas=grafica.drop_duplicates('orden').sort_values('orden')
+            posiciones=marcas.orden.tolist()
+            if len(posiciones)>8:
+                indices=np.unique(np.linspace(0,len(posiciones)-1,7,dtype=int))
+                marcas=marcas.iloc[indices]
+            fig_dist.update_layout(barmode='group',template='plotly_white',height=360,
+                                   xaxis_title=unidad,yaxis_title='Número de rutas',
+                                   xaxis={'tickmode':'array','tickvals':marcas.orden.tolist(),
+                                          'ticktext':[etiqueta_intervalo(grupo,unidad)[0] for grupo in marcas.grupo],
+                                          'tickangle':0,'range':[-.7,max(posiciones)+.7]},
+                                   legend={'title':'Modelo','orientation':'h','y':1.16,'x':0},
+                                   margin={'t':55,'b':65})
+            st.plotly_chart(fig_dist,use_container_width=True,key=f'distribucion_{variable}')
+        st.caption('Los intervalos son idénticos entre modelos. Las barras de los extremos agrupan las colas y “Sin llamada” conserva las rutas sin ese evento. La inspección individual sigue limitada a 20,000 rutas por modelo.')
         tabla=estadisticas[estadisticas.modelo==filtro].copy()
         tabla['nombre']=tabla.variable.map(lambda v: DEFINICIONES.get(v,(v,'',''))[0])
         tabla['unidad']=tabla.variable.map(lambda v: DEFINICIONES.get(v,('','',''))[1])
